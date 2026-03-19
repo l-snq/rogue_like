@@ -63,6 +63,8 @@ fn main() {
             enemy_ai,
             combat_system,
             update_damage_flinch,
+            update_enemy_telegraph,
+            update_attack_warnings,
             update_swing_effects,
             update_player_color,
             check_item_pickup,

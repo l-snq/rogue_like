@@ -98,6 +98,25 @@ impl DamageFlinch {
     pub const DURATION: f32 = 0.45;
 }
 
+// ── Enemy telegraph ───────────────────────────────────────────────────────────
+
+/// Placed on an enemy when it starts winding up an attack.
+/// Damage only lands when the timer reaches zero.
+#[derive(Component)]
+pub struct WindUp {
+    pub timer: f32,
+}
+
+impl WindUp {
+    pub const DURATION: f32 = 0.5; // seconds the player has to dodge
+}
+
+/// Floating "!" entity that tracks an enemy during its wind-up.
+#[derive(Component)]
+pub struct AttackWarning {
+    pub target: Entity,
+}
+
 // ── Markers for cleanup ───────────────────────────────────────────────────────
 
 /// Everything spawned per-level (tiles, actors, HUD)

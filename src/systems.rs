@@ -332,6 +332,7 @@ pub fn enemy_ai(
 
 pub fn combat_system(
     mut commands: Commands,
+    time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
     game_font: Res<GameFont>,
     mut player_q: Query<
@@ -339,7 +340,7 @@ pub fn combat_system(
         With<Player>,
     >,
     mut enemy_q: Query<
-        (Entity, &Transform, &mut Health, &Attack, &Defense, &mut AttackCooldown, Option<&Boss>),
+        (Entity, &Transform, &mut Health, &Attack, &Defense, &mut AttackCooldown, Option<&Boss>, Option<&mut WindUp>),
         (With<Enemy>, Without<Player>),
     >,
     mut score: ResMut<GameScore>,
@@ -352,13 +353,13 @@ pub fn combat_system(
         return;
     };
     let player_pos = pt.translation.truncate();
+    let dt = time.delta_secs();
     let mut rng = rand::thread_rng();
 
     let pressed = keys.just_pressed(KeyCode::Space) || keys.just_pressed(KeyCode::KeyZ);
     let can_attack = pressed && p_cd.0 <= 0.0;
 
     if can_attack {
-        // Spawn rotating cross swing effect
         let origin = player_pos + facing.0 * TILE_SIZE * 1.4;
         commands.spawn((
             Text2d::new(CH_SWORD),
@@ -371,14 +372,15 @@ pub fn combat_system(
         p_cd.0 = ATTACK_COOLDOWN_SECS;
     }
 
-    for (e_ent, et, mut e_hp, e_atk, e_def, mut e_cd, boss) in &mut enemy_q {
+    for (e_ent, et, mut e_hp, e_atk, e_def, mut e_cd, boss, wind_up) in &mut enemy_q {
         let dist = player_pos.distance(et.translation.truncate());
+        let has_windup = wind_up.is_some();
 
         if dist < ATTACK_RANGE {
+            // ── Player strikes enemy ───────────────────────────────────────
             if can_attack {
                 let dmg = (p_atk.0 - e_def.0 + rng.gen_range(0..=3)).max(1);
                 e_hp.current -= dmg;
-                // Flash white on enemy hit
                 let normal = if boss.is_some() { COL_BOSS } else { COL_ENEMY };
                 commands.entity(e_ent).insert(DamageFlinch {
                     timer: 0.0,
@@ -386,29 +388,50 @@ pub fn combat_system(
                     flash_color: Color::srgb(1.0, 1.0, 1.0),
                 });
             }
+
+            // ── Enemy attack (two-phase telegraph) ────────────────────────
             if e_cd.0 <= 0.0 {
-                let raw = (e_atk.0 - p_def.0 + rng.gen_range(0..=2)).max(1);
-                let dmg = if player_stats.is_blocking {
-                    (raw as f32 * SHIELD_BLOCK_RATIO).round().max(1.0) as i32
+                if let Some(mut wu) = wind_up {
+                    // Wind-up in progress — tick it down
+                    wu.timer -= dt;
+                    if wu.timer <= 0.0 {
+                        // Strike!
+                        let raw = (e_atk.0 - p_def.0 + rng.gen_range(0..=2)).max(1);
+                        let dmg = if player_stats.is_blocking {
+                            (raw as f32 * SHIELD_BLOCK_RATIO).round().max(1.0) as i32
+                        } else {
+                            raw
+                        };
+                        p_hp.current -= dmg;
+                        e_cd.0 = ATTACK_COOLDOWN_SECS + 0.25;
+                        commands.entity(e_ent).remove::<WindUp>();
+                        let normal = if player_stats.shield_broken { COL_BROKEN }
+                                     else if player_stats.is_blocking { COL_BLOCKING }
+                                     else { COL_PLAYER };
+                        commands.entity(player_entity).insert(DamageFlinch {
+                            timer: 0.0,
+                            normal_color: normal,
+                            flash_color: Color::srgb(1.0, 0.1, 0.1),
+                        });
+                    }
                 } else {
-                    raw
-                };
-                p_hp.current -= dmg;
-                e_cd.0 = ATTACK_COOLDOWN_SECS + 0.25;
-                // Flinch colour restores to whatever the shield state is
-                let normal = if player_stats.shield_broken {
-                    COL_BROKEN
-                } else if player_stats.is_blocking {
-                    COL_BLOCKING
-                } else {
-                    COL_PLAYER
-                };
-                commands.entity(player_entity).insert(DamageFlinch {
-                    timer: 0.0,
-                    normal_color: normal,
-                    flash_color: Color::srgb(1.0, 0.1, 0.1),
-                });
+                    // Begin wind-up — telegraph with "!" above enemy
+                    commands.entity(e_ent).insert(WindUp { timer: WindUp::DURATION });
+                    let warn_pos = et.translation + Vec3::new(0.0, TILE_SIZE, 4.0);
+                    commands.spawn((
+                        Text2d::new("!"),
+                        TextFont { font: game_font.0.clone(), font_size: TILE_SIZE * 1.1, ..default() },
+                        TextColor(Color::srgb(1.0, 0.75, 0.0)),
+                        Transform::from_translation(warn_pos),
+                        AttackWarning { target: e_ent },
+                        LevelEntity,
+                    ));
+                }
             }
+        } else if has_windup {
+            // Player dodged out of range — cancel the wind-up
+            commands.entity(e_ent).remove::<WindUp>();
+            e_cd.0 = ATTACK_COOLDOWN_SECS * 0.5;
         }
 
         if e_hp.current <= 0 {
@@ -424,6 +447,55 @@ pub fn combat_system(
     }
 
     player_stats.hp = p_hp.current;
+}
+
+// ── Enemy telegraph visuals ───────────────────────────────────────────────────
+
+/// Pulses winding-up enemies orange→red; restores idle enemies to normal colour.
+pub fn update_enemy_telegraph(
+    mut winding_q: Query<
+        (&WindUp, &mut TextColor, Option<&Boss>),
+        (With<Enemy>, Without<DamageFlinch>),
+    >,
+    mut normal_q: Query<
+        (&mut TextColor, Option<&Boss>),
+        (With<Enemy>, Without<WindUp>, Without<DamageFlinch>),
+    >,
+) {
+    for (wu, mut color, boss) in &mut winding_q {
+        // Pulse period shrinks as the strike approaches (urgency ramps up)
+        let progress = 1.0 - (wu.timer / WindUp::DURATION).clamp(0.0, 1.0);
+        let period = 0.12 - progress * 0.08; // 120 ms → 40 ms
+        let flash = (wu.timer / period.max(0.04)).floor() as u32 % 2 == 0;
+        let (bright, dim) = if boss.is_some() {
+            (Color::srgb(1.0, 0.45, 0.0), Color::srgb(1.0, 0.15, 0.0))
+        } else {
+            (Color::srgb(1.0, 0.75, 0.0), Color::srgb(1.0, 0.35, 0.0))
+        };
+        *color = TextColor(if flash { bright } else { dim });
+    }
+    for (mut color, boss) in &mut normal_q {
+        *color = TextColor(if boss.is_some() { COL_BOSS } else { COL_ENEMY });
+    }
+}
+
+/// Keeps the "!" warning positioned above its target enemy; removes it when
+/// the wind-up ends (attack landed or dodged).
+pub fn update_attack_warnings(
+    mut commands: Commands,
+    mut warnings: Query<(Entity, &AttackWarning, &mut Transform)>,
+    enemies: Query<&Transform, (With<Enemy>, With<WindUp>)>,
+) {
+    for (warn_entity, warning, mut warn_transform) in &mut warnings {
+        match enemies.get(warning.target) {
+            Ok(et) => {
+                warn_transform.translation = et.translation + Vec3::new(0.0, TILE_SIZE, 4.0);
+            }
+            Err(_) => {
+                commands.entity(warn_entity).despawn_recursive();
+            }
+        }
+    }
 }
 
 // ── Damage flinch / flicker ───────────────────────────────────────────────────
