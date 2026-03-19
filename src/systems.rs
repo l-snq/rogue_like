@@ -464,7 +464,6 @@ pub fn update_swing_effects(
 
     // Angle the facing direction points in world space
     let facing_angle = facing_dir.y.atan2(facing_dir.x);
-    let perp = Vec2::new(-facing_dir.y, facing_dir.x);
 
     for (entity, mut effect, mut transform, mut color) in &mut q {
         effect.elapsed += time.delta_secs();
@@ -478,14 +477,17 @@ pub fn update_swing_effects(
         // Sweep offset goes +1 → -1 over the duration
         let sweep = 1.0 - t * 2.0;
 
-        // Arc the position slightly along the perpendicular axis
-        let pos = player_pos + facing_dir * TILE_SIZE * 1.4 + perp * sweep * TILE_SIZE * 0.5;
+        // Rotate the glyph: sweep ±80° around the facing direction.
+        // † points UP by default, so facing_angle - PI/2 aligns it along facing_dir.
+        let angle = (facing_angle - std::f32::consts::FRAC_PI_2) + sweep * std::f32::consts::PI * 0.45;
+        transform.rotation = Quat::from_rotation_z(angle);
+
+        // Anchor the hilt at the player: blade direction is the glyph's local +Y rotated by angle.
+        let blade_dir = Vec2::new(-angle.sin(), angle.cos());
+        let half_len = TILE_SIZE * 1.1;
+        let pos = player_pos + blade_dir * half_len;
         transform.translation.x = pos.x;
         transform.translation.y = pos.y;
-
-        // Rotate the glyph: sweep ±80° around the facing direction
-        let angle = facing_angle + sweep * std::f32::consts::PI * 0.45;
-        transform.rotation = Quat::from_rotation_z(angle);
 
         // Fade out in the final 35%
         let alpha = if t > 0.65 { 1.0 - (t - 0.65) / 0.35 } else { 1.0 };
