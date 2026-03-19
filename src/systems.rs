@@ -47,6 +47,7 @@ pub fn setup_level(
     player_stats: Res<PlayerStats>,
     game_font: Res<GameFont>,
     game_textures: Res<GameTextures>,
+    loot_log: Res<LootLog>,
 ) {
     game_map.reset();
 
@@ -210,7 +211,7 @@ pub fn setup_level(
     ));
 
     // ── HUD ───────────────────────────────────────────────────────────────────
-    spawn_hud(&mut commands, font, current_level.0, player_stats.hp, player_stats.max_hp, player_stats.stamina, player_stats.max_stamina);
+    spawn_hud(&mut commands, font, current_level.0, player_stats.hp, player_stats.max_hp, player_stats.stamina, player_stats.max_stamina, &loot_log);
 }
 
 // ── Level transition ──────────────────────────────────────────────────────────
@@ -524,6 +525,27 @@ pub fn update_damage_flinch(
     }
 }
 
+// ── Loot popups ───────────────────────────────────────────────────────────────
+
+pub fn update_loot_popups(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut q: Query<(Entity, &mut LootPopup, &mut Transform, &mut TextColor)>,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut popup, mut tf, mut color) in &mut q {
+        popup.elapsed += dt;
+        let t = (popup.elapsed / LootPopup::DURATION).clamp(0.0, 1.0);
+        if t >= 1.0 {
+            commands.entity(entity).despawn_recursive();
+            continue;
+        }
+        tf.translation.y += TILE_SIZE * 1.6 * dt;
+        let alpha = if t > 0.55 { 1.0 - (t - 0.55) / 0.45 } else { 1.0 };
+        *color = TextColor(Color::srgba(popup.r, popup.g, popup.b, alpha));
+    }
+}
+
 // ── Swing effect animation ────────────────────────────────────────────────────
 
 pub fn update_swing_effects(
@@ -577,12 +599,14 @@ pub fn update_swing_effects(
 
 pub fn check_item_pickup(
     mut commands: Commands,
+    game_font: Res<GameFont>,
     player_q: Query<&Transform, With<Player>>,
     chest_q: Query<(Entity, &Transform), With<Chest>>,
     item_q: Query<(Entity, &Transform, &Item)>,
     mut player_stats: ResMut<PlayerStats>,
     mut score: ResMut<GameScore>,
     mut player_health_q: Query<&mut Health, With<Player>>,
+    mut loot_log: ResMut<LootLog>,
 ) {
     let Ok(pt) = player_q.get_single() else { return; };
     let pp = pt.translation.truncate();
@@ -590,14 +614,18 @@ pub fn check_item_pickup(
 
     for (ce, ct) in &chest_q {
         if pp.distance(ct.translation.truncate()) < TILE_SIZE * 0.9 {
-            apply_random_loot(&mut player_stats, &mut score, &mut rng, &mut player_health_q);
+            let msg = apply_random_loot(&mut player_stats, &mut score, &mut rng, &mut player_health_q);
+            loot_log.push(msg.clone());
+            spawn_loot_popup(&mut commands, &game_font, ct.translation.truncate(), &msg);
             commands.entity(ce).despawn_recursive();
         }
     }
 
     for (ie, it, item) in &item_q {
         if pp.distance(it.translation.truncate()) < TILE_SIZE * 0.9 {
-            apply_item(&item.0, &mut player_stats, &mut score, &mut player_health_q);
+            let msg = apply_item(&item.0, &mut player_stats, &mut score, &mut player_health_q);
+            loot_log.push(msg.clone());
+            spawn_loot_popup(&mut commands, &game_font, it.translation.truncate(), &msg);
             commands.entity(ie).despawn_recursive();
         }
     }
@@ -608,16 +636,21 @@ fn apply_random_loot(
     score: &mut GameScore,
     rng: &mut impl Rng,
     health_q: &mut Query<&mut Health, With<Player>>,
-) {
+) -> String {
     match rng.gen_range(0u32..4) {
-        0 => { stats.attack += 1; score.score += 5; }
-        1 => { stats.defense += 1; score.score += 5; }
+        0 => { stats.attack += 1;  score.score += 5; "ATK +1".to_string() }
+        1 => { stats.defense += 1; score.score += 5; "DEF +1".to_string() }
         2 => {
             let heal = rng.gen_range(6..=12i32);
             heal_player(stats, health_q, heal);
             score.score += 5;
+            format!("HP +{}", heal)
         }
-        _ => { score.score += rng.gen_range(5u32..=25); }
+        _ => {
+            let gold = rng.gen_range(5u32..=25);
+            score.score += gold;
+            format!("+{} GOLD", gold)
+        }
     }
 }
 
@@ -626,13 +659,32 @@ fn apply_item(
     stats: &mut PlayerStats,
     score: &mut GameScore,
     health_q: &mut Query<&mut Health, With<Player>>,
-) {
+) -> String {
     match item {
-        ItemType::Weapon => { stats.attack += 1; score.score += 5; }
-        ItemType::Armor  => { stats.defense += 1; score.score += 5; }
-        ItemType::Potion => { heal_player(stats, health_q, 10); score.score += 5; }
-        ItemType::Coins(n) => { score.score += n; }
+        ItemType::Weapon  => { stats.attack += 1;  score.score += 5; "ATK +1".to_string() }
+        ItemType::Armor   => { stats.defense += 1; score.score += 5; "DEF +1".to_string() }
+        ItemType::Potion  => { heal_player(stats, health_q, 10); score.score += 5; "HP +10".to_string() }
+        ItemType::Coins(n) => { score.score += n; format!("+{} GOLD", n) }
     }
+}
+
+fn spawn_loot_popup(commands: &mut Commands, font: &GameFont, world_pos: Vec2, text: &str) {
+    let (r, g, b) = loot_rgb(text);
+    commands.spawn((
+        Text2d::new(text),
+        TextFont { font: font.0.clone(), font_size: TILE_SIZE * 0.95, ..default() },
+        TextColor(Color::srgb(r, g, b)),
+        Transform::from_xyz(world_pos.x, world_pos.y + TILE_SIZE, 5.0),
+        LootPopup { elapsed: 0.0, r, g, b },
+        LevelEntity,
+    ));
+}
+
+fn loot_rgb(msg: &str) -> (f32, f32, f32) {
+    if msg.starts_with("ATK")      { (1.0, 0.50, 0.15) }  // orange
+    else if msg.starts_with("DEF") { (0.30, 0.80, 1.0) }  // cyan
+    else if msg.starts_with("HP")  { (0.25, 1.0,  0.45) } // green
+    else                           { (1.0,  0.88, 0.15) }  // gold
 }
 
 fn heal_player(
@@ -766,7 +818,7 @@ pub fn update_entity_visibility(
     game_map: Res<GameMap>,
     mut q: Query<
         (&Transform, &mut Visibility),
-        (With<LevelEntity>, Without<TilePos>, Without<Player>, Without<Node>),
+        (With<LevelEntity>, Without<TilePos>, Without<Player>, Without<Node>, Without<LootPopup>),
     >,
 ) {
     for (t, mut vis) in &mut q {
@@ -788,7 +840,7 @@ pub fn update_entity_visibility(
 //  HUD
 // ═══════════════════════════════════════════════════════════════════════════════
 
-fn spawn_hud(commands: &mut Commands, font: Handle<Font>, level: u32, hp: i32, max_hp: i32, stamina: f32, max_stamina: f32) {
+fn spawn_hud(commands: &mut Commands, font: Handle<Font>, level: u32, hp: i32, max_hp: i32, stamina: f32, max_stamina: f32, loot_log: &LootLog) {
     commands
         .spawn((
             Node {
@@ -826,6 +878,37 @@ fn spawn_hud(commands: &mut Commands, font: Handle<Font>, level: u32, hp: i32, m
                 ));
             });
 
+            // Loot log panel — absolute, right-side below the score
+            root.spawn(Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(10.0),
+                top: Val::Px(36.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::FlexEnd,
+                row_gap: Val::Px(1.0),
+                ..default()
+            })
+            .with_children(|col| {
+                col.spawn((
+                    Node::default(),
+                    Text::new("LOOT"),
+                    TextFont { font: font.clone(), font_size: 11.0, ..default() },
+                    TextColor(Color::srgb(0.55, 0.55, 0.35)),
+                ));
+                for i in 0..LootLog::MAX_ENTRIES {
+                    let entry = loot_log.entries.get(i).map(String::as_str).unwrap_or("");
+                    let (r, g, b) = loot_rgb(entry);
+                    col.spawn((
+                        Node::default(),
+                        Text::new(entry),
+                        TextFont { font: font.clone(), font_size: 13.0, ..default() },
+                        TextColor(Color::srgba(r, g, b, 0.85)),
+                        HudLootLogText(i),
+                        LevelEntity,
+                    ));
+                }
+            });
+
             // Bottom bar
             root.spawn(Node {
                 flex_direction: FlexDirection::Row,
@@ -860,17 +943,22 @@ pub fn update_hud(
     score: Res<GameScore>,
     player_stats: Res<PlayerStats>,
     current_level: Res<CurrentLevel>,
+    loot_log: Res<LootLog>,
     mut hp_q: Query<
         &mut Text,
-        (With<HudHealthText>, Without<HudScoreText>, Without<HudLevelText>),
+        (With<HudHealthText>, Without<HudScoreText>, Without<HudLevelText>, Without<HudLootLogText>),
     >,
     mut score_q: Query<
         &mut Text,
-        (With<HudScoreText>, Without<HudHealthText>, Without<HudLevelText>),
+        (With<HudScoreText>, Without<HudHealthText>, Without<HudLevelText>, Without<HudLootLogText>),
     >,
     mut level_q: Query<
         &mut Text,
-        (With<HudLevelText>, Without<HudHealthText>, Without<HudScoreText>),
+        (With<HudLevelText>, Without<HudHealthText>, Without<HudScoreText>, Without<HudLootLogText>),
+    >,
+    mut log_q: Query<
+        (&HudLootLogText, &mut Text),
+        (Without<HudHealthText>, Without<HudScoreText>, Without<HudLevelText>),
     >,
 ) {
     for mut t in &mut hp_q {
@@ -894,6 +982,10 @@ pub fn update_hud(
     }
     for mut t in &mut level_q {
         *t = Text::new(format!("Floor  {}/{}", current_level.0, NUM_LEVELS));
+    }
+    for (slot, mut t) in &mut log_q {
+        let entry = loot_log.entries.get(slot.0).map(String::as_str).unwrap_or("");
+        *t = Text::new(entry);
     }
 }
 
@@ -967,11 +1059,13 @@ pub fn menu_input(
     mut player_stats: ResMut<PlayerStats>,
     mut score: ResMut<GameScore>,
     mut current_level: ResMut<CurrentLevel>,
+    mut loot_log: ResMut<LootLog>,
 ) {
     if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) {
         *player_stats = PlayerStats::default();
         *score = GameScore::default();
         *current_level = CurrentLevel(1);
+        *loot_log = LootLog::default();
         next_state.set(GameState::Playing);
     }
 }

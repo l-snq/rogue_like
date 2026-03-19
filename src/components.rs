@@ -117,6 +117,21 @@ pub struct AttackWarning {
     pub target: Entity,
 }
 
+// ── Loot popup ────────────────────────────────────────────────────────────────
+
+/// Floating world-space text that rises and fades after a chest is opened.
+#[derive(Component)]
+pub struct LootPopup {
+    pub elapsed: f32,
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+}
+
+impl LootPopup {
+    pub const DURATION: f32 = 1.4;
+}
+
 // ── Markers for cleanup ───────────────────────────────────────────────────────
 
 /// Everything spawned per-level (tiles, actors, HUD)
@@ -137,3 +152,7 @@ pub struct HudScoreText;
 
 #[derive(Component)]
 pub struct HudLevelText;
+
+/// Slot index 0 = most recent pickup. Up to LootLog::MAX_ENTRIES slots spawned.
+#[derive(Component)]
+pub struct HudLootLogText(pub usize);

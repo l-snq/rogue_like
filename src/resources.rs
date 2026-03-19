@@ -166,6 +166,22 @@ pub struct GameTextures {
     pub ladder:       Handle<Image>,
 }
 
+// ── Loot log ──────────────────────────────────────────────────────────────────
+
+#[derive(Resource, Default)]
+pub struct LootLog {
+    pub entries: std::collections::VecDeque<String>,
+}
+
+impl LootLog {
+    pub const MAX_ENTRIES: usize = 5;
+
+    pub fn push(&mut self, s: String) {
+        self.entries.push_front(s);
+        self.entries.truncate(Self::MAX_ENTRIES);
+    }
+}
+
 // ── Score / Level resources ───────────────────────────────────────────────────
 
 #[derive(Resource, Default)]

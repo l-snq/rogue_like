@@ -47,6 +47,7 @@ fn main() {
     .init_resource::<GameScore>()
     .init_resource::<CurrentLevel>()
     .init_resource::<PlayerStats>()
+    .init_resource::<LootLog>()
     // ── Main Menu ──────────────────────────────────────────────────────────────
     .add_systems(OnEnter(GameState::MainMenu), setup_main_menu)
     .add_systems(OnExit(GameState::MainMenu), cleanup_entities::<components::MenuEntity>)
@@ -63,6 +64,7 @@ fn main() {
             enemy_ai,
             combat_system,
             update_damage_flinch,
+            update_loot_popups,
             update_enemy_telegraph,
             update_attack_warnings,
             update_swing_effects,
