@@ -9,25 +9,15 @@ use crate::{
     GameState,
 };
 
-// ── Character constants ───────────────────────────────────────────────────────
-// JetBrainsMonoNerdFont covers all of these.
+// ── Character constants (text-only effects) ───────────────────────────────────
 
-const CH_WALL_VIS:  &str = "█";   // U+2588  full block
-const CH_WALL_EXP:  &str = "▒";   // U+2592  medium shade
-const CH_FLOOR_VIS: &str = "·";   // U+00B7  middle dot
-const CH_PLAYER:    &str = "@";
-const CH_ENEMY:     &str = "☻";   // U+263B  black smiling face
-const CH_BOSS:      &str = "☠";   // U+2620  skull & crossbones
-const CH_CHEST:     &str = "▣";   // U+25A3  white square containing black square
-const CH_LADDER:    &str = "↓";   // U+2193  downwards arrow
-const CH_SWORD:     &str = "†";   // U+2020  dagger — rotated each frame
+const CH_SWORD: &str = "†";   // U+2020  dagger — swing effect (rotated each frame)
 
-// Normal entity colours (used by DamageFlinch restore)
-pub const COL_PLAYER:    Color = Color::srgb(1.0, 1.0,  0.0);  // yellow — default
-pub const COL_BLOCKING:  Color = Color::srgb(0.0, 1.0,  1.0);  // cyan   — shield up
-pub const COL_BROKEN:    Color = Color::srgb(1.0, 0.5,  0.0);  // orange — shield broken
-pub const COL_ENEMY:     Color = Color::srgb(1.0, 0.45, 0.45);
-pub const COL_BOSS:      Color = Color::srgb(1.0, 0.15, 0.15);
+// Sprite tint constants — applied multiplicatively over the PNG texture.
+// Color::WHITE = no tint (show texture as-is).
+pub const COL_NORMAL:   Color = Color::WHITE;                   // all actors at rest
+pub const COL_BLOCKING: Color = Color::srgb(0.4, 0.9,  1.0);  // cyan   — shield up
+pub const COL_BROKEN:   Color = Color::srgb(1.0, 0.45, 0.0);  // orange — shield broken
 
 // ── Generic cleanup ───────────────────────────────────────────────────────────
 
@@ -56,6 +46,7 @@ pub fn setup_level(
     current_level: Res<CurrentLevel>,
     player_stats: Res<PlayerStats>,
     game_font: Res<GameFont>,
+    game_textures: Res<GameTextures>,
 ) {
     game_map.reset();
 
@@ -74,11 +65,19 @@ pub fn setup_level(
             let tile = game_map.tiles[idx];
             let world = grid_to_world(gx, gy);
 
+            let tile_image = if tile == TileType::Wall {
+                game_textures.wall.clone()
+            } else {
+                game_textures.floor.clone()
+            };
             let mut ec = commands.spawn((
-                Text2d::new(" "),
-                TextFont { font: font.clone(), font_size: TILE_SIZE, ..default() },
-                TextColor(Color::NONE),
+                Sprite {
+                    image: tile_image,
+                    custom_size: Some(Vec2::splat(TILE_SIZE)),
+                    ..default()
+                },
                 Transform::from_xyz(world.x, world.y, 0.0),
+                Visibility::Hidden,
                 TilePos { x: gx, y: gy },
                 LevelEntity,
             ));
@@ -117,9 +116,11 @@ pub fn setup_level(
     let pw = grid_to_world(data.player_start.0, data.player_start.1);
     commands.spawn((
         (
-            Text2d::new(CH_PLAYER),
-            TextFont { font: font.clone(), font_size: TILE_SIZE, ..default() },
-            TextColor(COL_PLAYER),
+            Sprite {
+                image: game_textures.player.clone(),
+                custom_size: Some(Vec2::splat(TILE_SIZE)),
+                ..default()
+            },
             Transform::from_xyz(pw.x, pw.y, 2.0),
             Player,
             Health::new(player_stats.max_hp),
@@ -142,17 +143,19 @@ pub fn setup_level(
     // ── Enemies & Boss ────────────────────────────────────────────────────────
     for spawn in &data.enemies {
         let ew = grid_to_world(spawn.x, spawn.y);
-        let (ch, col) = if spawn.is_boss {
-            (CH_BOSS, COL_BOSS)
+        let img = if spawn.is_boss {
+            game_textures.boss.clone()
         } else {
-            (CH_ENEMY, COL_ENEMY)
+            game_textures.enemy.clone()
         };
 
         let mut ec = commands.spawn((
             (
-                Text2d::new(ch),
-                TextFont { font: font.clone(), font_size: TILE_SIZE, ..default() },
-                TextColor(col),
+                Sprite {
+                    image: img,
+                    custom_size: Some(Vec2::splat(TILE_SIZE)),
+                    ..default()
+                },
                 Transform::from_xyz(ew.x, ew.y, 2.0),
                 Enemy,
                 Health::new(spawn.hp),
@@ -181,9 +184,11 @@ pub fn setup_level(
     for &(cx, cy) in &data.chests {
         let cw = grid_to_world(cx, cy);
         commands.spawn((
-            Text2d::new(CH_CHEST),
-            TextFont { font: font.clone(), font_size: TILE_SIZE, ..default() },
-            TextColor(Color::srgb(0.85, 0.65, 0.15)),
+            Sprite {
+                image: game_textures.chest.clone(),
+                custom_size: Some(Vec2::splat(TILE_SIZE)),
+                ..default()
+            },
             Transform::from_xyz(cw.x, cw.y, 1.5),
             Chest,
             LevelEntity,
@@ -193,9 +198,11 @@ pub fn setup_level(
     // ── Ladder (hidden until boss dies) ───────────────────────────────────────
     let lw = grid_to_world(data.ladder_pos.0, data.ladder_pos.1);
     commands.spawn((
-        Text2d::new(CH_LADDER),
-        TextFont { font: font.clone(), font_size: TILE_SIZE, ..default() },
-        TextColor(Color::srgb(0.2, 1.0, 0.3)),
+        Sprite {
+            image: game_textures.ladder.clone(),
+            custom_size: Some(Vec2::splat(TILE_SIZE)),
+            ..default()
+        },
         Transform::from_xyz(lw.x, lw.y, 1.5),
         Ladder,
         Visibility::Hidden,
@@ -271,17 +278,17 @@ pub fn shield_system(
 
 pub fn update_player_color(
     player_stats: Res<PlayerStats>,
-    mut q: Query<&mut TextColor, (With<Player>, Without<DamageFlinch>)>,
+    mut q: Query<&mut Sprite, (With<Player>, Without<DamageFlinch>)>,
 ) {
     let col = if player_stats.shield_broken {
         COL_BROKEN
     } else if player_stats.is_blocking {
         COL_BLOCKING
     } else {
-        COL_PLAYER
+        COL_NORMAL
     };
-    for mut tc in &mut q {
-        *tc = TextColor(col);
+    for mut sprite in &mut q {
+        sprite.color = col;
     }
 }
 
@@ -381,11 +388,10 @@ pub fn combat_system(
             if can_attack {
                 let dmg = (p_atk.0 - e_def.0 + rng.gen_range(0..=3)).max(1);
                 e_hp.current -= dmg;
-                let normal = if boss.is_some() { COL_BOSS } else { COL_ENEMY };
                 commands.entity(e_ent).insert(DamageFlinch {
                     timer: 0.0,
-                    normal_color: normal,
-                    flash_color: Color::srgb(1.0, 1.0, 1.0),
+                    normal_color: COL_NORMAL,
+                    flash_color: Color::WHITE,
                 });
             }
 
@@ -407,11 +413,11 @@ pub fn combat_system(
                         commands.entity(e_ent).remove::<WindUp>();
                         let normal = if player_stats.shield_broken { COL_BROKEN }
                                      else if player_stats.is_blocking { COL_BLOCKING }
-                                     else { COL_PLAYER };
+                                     else { COL_NORMAL };
                         commands.entity(player_entity).insert(DamageFlinch {
                             timer: 0.0,
                             normal_color: normal,
-                            flash_color: Color::srgb(1.0, 0.1, 0.1),
+                            flash_color: Color::srgb(1.0, 0.15, 0.15),
                         });
                     }
                 } else {
@@ -454,28 +460,28 @@ pub fn combat_system(
 /// Pulses winding-up enemies orange→red; restores idle enemies to normal colour.
 pub fn update_enemy_telegraph(
     mut winding_q: Query<
-        (&WindUp, &mut TextColor, Option<&Boss>),
+        (&WindUp, &mut Sprite, Option<&Boss>),
         (With<Enemy>, Without<DamageFlinch>),
     >,
     mut normal_q: Query<
-        (&mut TextColor, Option<&Boss>),
+        &mut Sprite,
         (With<Enemy>, Without<WindUp>, Without<DamageFlinch>),
     >,
 ) {
-    for (wu, mut color, boss) in &mut winding_q {
+    for (wu, mut sprite, boss) in &mut winding_q {
         // Pulse period shrinks as the strike approaches (urgency ramps up)
         let progress = 1.0 - (wu.timer / WindUp::DURATION).clamp(0.0, 1.0);
         let period = 0.12 - progress * 0.08; // 120 ms → 40 ms
         let flash = (wu.timer / period.max(0.04)).floor() as u32 % 2 == 0;
         let (bright, dim) = if boss.is_some() {
-            (Color::srgb(1.0, 0.45, 0.0), Color::srgb(1.0, 0.15, 0.0))
+            (Color::srgb(1.0, 0.45, 0.0), Color::srgb(0.8, 0.15, 0.0))
         } else {
-            (Color::srgb(1.0, 0.75, 0.0), Color::srgb(1.0, 0.35, 0.0))
+            (Color::srgb(1.0, 0.8, 0.0), Color::srgb(1.0, 0.35, 0.0))
         };
-        *color = TextColor(if flash { bright } else { dim });
+        sprite.color = if flash { bright } else { dim };
     }
-    for (mut color, boss) in &mut normal_q {
-        *color = TextColor(if boss.is_some() { COL_BOSS } else { COL_ENEMY });
+    for mut sprite in &mut normal_q {
+        sprite.color = COL_NORMAL;
     }
 }
 
@@ -483,7 +489,7 @@ pub fn update_enemy_telegraph(
 /// the wind-up ends (attack landed or dodged).
 pub fn update_attack_warnings(
     mut commands: Commands,
-    mut warnings: Query<(Entity, &AttackWarning, &mut Transform)>,
+    mut warnings: Query<(Entity, &AttackWarning, &mut Transform), Without<Enemy>>,
     enemies: Query<&Transform, (With<Enemy>, With<WindUp>)>,
 ) {
     for (warn_entity, warning, mut warn_transform) in &mut warnings {
@@ -503,17 +509,17 @@ pub fn update_attack_warnings(
 pub fn update_damage_flinch(
     mut commands: Commands,
     time: Res<Time>,
-    mut q: Query<(Entity, &mut DamageFlinch, &mut TextColor)>,
+    mut q: Query<(Entity, &mut DamageFlinch, &mut Sprite)>,
 ) {
-    for (entity, mut flinch, mut color) in &mut q {
+    for (entity, mut flinch, mut sprite) in &mut q {
         flinch.timer += time.delta_secs();
         if flinch.timer >= DamageFlinch::DURATION {
-            *color = TextColor(flinch.normal_color);
+            sprite.color = flinch.normal_color;
             commands.entity(entity).remove::<DamageFlinch>();
         } else {
             // Flicker at ~12 Hz
             let flash = (flinch.timer / 0.055).floor() as u32 % 2 == 0;
-            *color = TextColor(if flash { flinch.flash_color } else { flinch.normal_color });
+            sprite.color = if flash { flinch.flash_color } else { flinch.normal_color };
         }
     }
 }
@@ -725,28 +731,32 @@ fn line_of_sight(map: &GameMap, x0: i32, y0: i32, x1: i32, y1: i32) -> bool {
 
 pub fn update_tile_rendering(
     game_map: Res<GameMap>,
-    mut tile_q: Query<(&TilePos, &mut Text2d, &mut TextColor)>,
+    game_textures: Res<GameTextures>,
+    mut tile_q: Query<(&TilePos, &mut Sprite, &mut Visibility)>,
 ) {
-    for (tp, mut text, mut color) in &mut tile_q {
+    for (tp, mut sprite, mut vis) in &mut tile_q {
         let idx = game_map.idx(tp.x, tp.y);
         match game_map.fog[idx] {
             FogState::Hidden => {
-                *text = Text2d::new(" ");
-                *color = TextColor(Color::NONE);
+                *vis = Visibility::Hidden;
             }
             FogState::Explored => {
-                let ch = if game_map.tiles[idx] == TileType::Wall { CH_WALL_EXP } else { CH_FLOOR_VIS };
-                *text = Text2d::new(ch);
-                *color = TextColor(Color::srgb(0.16, 0.16, 0.20));
+                *vis = Visibility::Visible;
+                sprite.image = if game_map.tiles[idx] == TileType::Wall {
+                    game_textures.wall_dimmed.clone()
+                } else {
+                    game_textures.floor_dimmed.clone()
+                };
+                sprite.color = Color::WHITE;
             }
             FogState::Visible => {
-                let (ch, c) = if game_map.tiles[idx] == TileType::Wall {
-                    (CH_WALL_VIS, Color::srgb(0.52, 0.52, 0.62))
+                *vis = Visibility::Visible;
+                sprite.image = if game_map.tiles[idx] == TileType::Wall {
+                    game_textures.wall.clone()
                 } else {
-                    (CH_FLOOR_VIS, Color::srgb(0.26, 0.26, 0.34))
+                    game_textures.floor.clone()
                 };
-                *text = Text2d::new(ch);
-                *color = TextColor(c);
+                sprite.color = Color::WHITE;
             }
         }
     }
@@ -756,7 +766,7 @@ pub fn update_entity_visibility(
     game_map: Res<GameMap>,
     mut q: Query<
         (&Transform, &mut Visibility),
-        (With<LevelEntity>, Without<TilePos>, Without<Player>, Without<Node>, Without<Sprite>),
+        (With<LevelEntity>, Without<TilePos>, Without<Player>, Without<Node>),
     >,
 ) {
     for (t, mut vis) in &mut q {

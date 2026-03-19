@@ -151,6 +151,21 @@ impl GameMap {
 #[derive(Resource)]
 pub struct GameFont(pub Handle<Font>);
 
+// ── Texture resource ──────────────────────────────────────────────────────────
+
+#[derive(Resource)]
+pub struct GameTextures {
+    pub wall:         Handle<Image>,
+    pub wall_dimmed:  Handle<Image>,
+    pub floor:        Handle<Image>,
+    pub floor_dimmed: Handle<Image>,
+    pub player:       Handle<Image>,
+    pub enemy:        Handle<Image>,
+    pub boss:         Handle<Image>,
+    pub chest:        Handle<Image>,
+    pub ladder:       Handle<Image>,
+}
+
 // ── Score / Level resources ───────────────────────────────────────────────────
 
 #[derive(Resource, Default)]

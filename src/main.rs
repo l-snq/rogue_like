@@ -88,14 +88,25 @@ fn main() {
     .add_systems(OnExit(GameState::Victory), cleanup_entities::<components::MenuEntity>)
     .add_systems(Update, end_screen_input.run_if(in_state(GameState::Victory)));
 
-    // Insert the font resource directly into the world BEFORE app.run() so it is
-    // guaranteed to exist when OnEnter(MainMenu) fires (which happens in the first
-    // PreUpdate, before any Startup-system commands would be flushed).
-    let font_handle = app
-        .world()
-        .resource::<AssetServer>()
-        .load("fonts/JetBrainsMonoNerdFont-Regular.ttf");
-    app.world_mut().insert_resource(GameFont(font_handle));
+    // Insert font + texture resources before app.run() so they're available when
+    // OnEnter(MainMenu) fires in the first PreUpdate frame.
+    {
+        let assets = app.world().resource::<AssetServer>();
+        let font_handle = assets.load("fonts/JetBrainsMonoNerdFont-Regular.ttf");
+        let textures = resources::GameTextures {
+            wall:         assets.load("wall.png"),
+            wall_dimmed:  assets.load("wall_dimmed.png"),
+            floor:        assets.load("floor.png"),
+            floor_dimmed: assets.load("floor_dimmed.png"),
+            player:       assets.load("character.png"),
+            enemy:        assets.load("enemy.png"),
+            boss:         assets.load("boss.png"),
+            chest:        assets.load("chest.png"),
+            ladder:       assets.load("ladder.png"),
+        };
+        app.world_mut().insert_resource(GameFont(font_handle));
+        app.world_mut().insert_resource(textures);
+    }
 
     app.run();
 }
