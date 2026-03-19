@@ -1,6 +1,11 @@
- [build]
- command = "curl -L https://github.com/trunk-rs/trunk/releases/download/v0.21.1/trunk-x86_64-unknown-linux-gnu.tar.gz | tar -xz && ./trunk build --release"
- publish = "dist"
-
- [build.environment]
- RUSTUP_TOOLCHAIN = "stable"
+[build]
+  command = """
+  curl -L https://github.com/trunk-rs/trunk/releases/download/v0.21.1/trunk-x86_64-unknown-linux-gnu.tar.gz \
+    | tar -xz && \
+  rustup toolchain install stable && \
+  rustup target add --toolchain stable wasm32-unknown-unknown && \
+  ./trunk build --release
+  """
+  publish = "dist"
+[build.environment]
+	RUSTUP_TOOLCHAIN = "stable"
