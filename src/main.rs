@@ -48,6 +48,7 @@ fn main() {
     .init_resource::<CurrentLevel>()
     .init_resource::<PlayerStats>()
     .init_resource::<LootLog>()
+    .init_resource::<PlayerSpells>()
     // ── Main Menu ──────────────────────────────────────────────────────────────
     .add_systems(OnEnter(GameState::MainMenu), setup_main_menu)
     .add_systems(OnExit(GameState::MainMenu), cleanup_entities::<components::MenuEntity>)
@@ -58,24 +59,12 @@ fn main() {
     .add_systems(
         Update,
         (
-            tick_cooldowns,
-            shield_system,
-            player_input,
-            enemy_ai,
-            combat_system,
-            update_damage_flinch,
-            update_loot_popups,
-            update_enemy_telegraph,
-            update_attack_warnings,
-            update_swing_effects,
-            update_player_color,
-            check_item_pickup,
-            check_ladder,
-            check_death,
-            update_fog_of_war,
-            update_tile_rendering,
-            update_entity_visibility,
-            update_hud,
+            (tick_cooldowns, shield_system, cast_spell, player_input, enemy_ai),
+            (combat_system, update_projectiles, update_status_effects),
+            (update_damage_flinch, update_loot_popups, update_enemy_telegraph,
+             update_attack_warnings, update_swing_effects, update_player_color),
+            (check_item_pickup, check_ladder, check_death,
+             update_fog_of_war, update_tile_rendering, update_entity_visibility, update_hud),
         )
             .run_if(in_state(GameState::Playing)),
     )

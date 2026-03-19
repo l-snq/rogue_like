@@ -223,6 +223,7 @@ pub fn transition_level(
 ) {
     current_level.0 += 1;
     player_stats.hp = (player_stats.hp + 8).min(player_stats.max_hp);
+    player_stats.mana = (player_stats.mana + 30.0).min(player_stats.max_mana);
     next_state.set(GameState::Playing);
 }
 
@@ -293,6 +294,279 @@ pub fn update_player_color(
     }
 }
 
+// ── Spell casting ─────────────────────────────────────────────────────────────
+
+pub fn cast_spell(
+    mut commands: Commands,
+    time: Res<Time>,
+    keys: Res<ButtonInput<KeyCode>>,
+    game_font: Res<GameFont>,
+    mut player_spells: ResMut<PlayerSpells>,
+    mut player_stats: ResMut<PlayerStats>,
+    mut score: ResMut<GameScore>,
+    mut game_map: ResMut<GameMap>,
+    player_q: Query<(&Transform, &FacingDirection), With<Player>>,
+    mut enemy_q: Query<(Entity, &Transform, &mut Health, Option<&Boss>), With<Enemy>>,
+) {
+    let dt = time.delta_secs();
+
+    // Mana regen + cooldown tick every frame
+    player_stats.mana = (player_stats.mana + MANA_REGEN_RATE * dt).min(player_stats.max_mana);
+    player_spells.cooldown = (player_spells.cooldown - dt).max(0.0);
+
+    // Cycle active spell with E
+    if keys.just_pressed(KeyCode::KeyE) && player_spells.known.len() > 1 {
+        player_spells.active = (player_spells.active + 1) % player_spells.known.len();
+    }
+
+    // Cast with Q
+    if !keys.just_pressed(KeyCode::KeyQ) { return; }
+    if player_spells.cooldown > 0.0 { return; }
+
+    let Ok((pt, facing)) = player_q.get_single() else { return; };
+    let player_pos = pt.translation.truncate();
+
+    let spell = player_spells.known[player_spells.active];
+    if player_stats.mana < spell.mana_cost() { return; }
+
+    player_stats.mana -= spell.mana_cost();
+    player_spells.cooldown = SPELL_COOLDOWN_SECS;
+
+    let (r, g, b) = spell.color();
+    let mut rng = rand::thread_rng();
+
+    match spell {
+        SpellType::Fireball | SpellType::IceShard => {
+            let origin = player_pos + facing.0 * TILE_SIZE;
+            commands.spawn((
+                Text2d::new(spell.glyph()),
+                TextFont { font: game_font.0.clone(), font_size: TILE_SIZE * 0.9, ..default() },
+                TextColor(Color::srgb(r, g, b)),
+                Transform::from_xyz(origin.x, origin.y, 3.5),
+                Projectile {
+                    spell,
+                    damage: match spell {
+                        SpellType::Fireball  => rng.gen_range(8..=12),
+                        SpellType::IceShard  => rng.gen_range(5..=8),
+                        _                    => 8,
+                    },
+                    direction: facing.0,
+                    speed: TILE_SIZE * 14.0,
+                    elapsed: 0.0,
+                    max_lifetime: 1.6,
+                },
+                LevelEntity,
+            ));
+        }
+
+        SpellType::Lightning => {
+            // Find nearest enemy in range (immutable pass)
+            let range = TILE_SIZE * 9.0;
+            let nearest = enemy_q.iter()
+                .filter_map(|(e, et, _, _)| {
+                    let d = player_pos.distance(et.translation.truncate());
+                    if d < range { Some((e, d)) } else { None }
+                })
+                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+                .map(|(e, _)| e);
+
+            // Mutable pass to apply damage
+            if let Some(e_ent) = nearest {
+                if let Ok((_, et, mut hp, boss)) = enemy_q.get_mut(e_ent) {
+                    let dmg = rng.gen_range(20..=32i32);
+                    hp.current -= dmg;
+                    commands.entity(e_ent).insert(DamageFlinch {
+                        timer: 0.0,
+                        normal_color: Color::WHITE,
+                        flash_color: Color::srgb(1.0, 1.0, 0.3),
+                    });
+                    // Spawn a brief flash at enemy position
+                    let ep = et.translation;
+                    commands.spawn((
+                        Text2d::new(spell.glyph()),
+                        TextFont { font: game_font.0.clone(), font_size: TILE_SIZE * 1.4, ..default() },
+                        TextColor(Color::srgb(r, g, b)),
+                        Transform::from_xyz(ep.x, ep.y, 4.0),
+                        Projectile {
+                            spell,
+                            damage: 0,
+                            direction: Vec2::ZERO,
+                            speed: 0.0,
+                            elapsed: 0.0,
+                            max_lifetime: 0.25, // just a visual flash
+                        },
+                        LevelEntity,
+                    ));
+                    if hp.current <= 0 {
+                        if boss.is_some() { game_map.boss_dead = true; score.score += 150; }
+                        else { score.score += 10; }
+                        score.kills += 1;
+                        commands.entity(e_ent).despawn_recursive();
+                    }
+                }
+            }
+        }
+
+        SpellType::PoisonCloud => {
+            let radius = TILE_SIZE * 3.5;
+            // Spawn area cloud glyph at player
+            commands.spawn((
+                Text2d::new(spell.glyph()),
+                TextFont { font: game_font.0.clone(), font_size: TILE_SIZE * 2.2, ..default() },
+                TextColor(Color::srgba(r, g, b, 0.85)),
+                Transform::from_xyz(player_pos.x, player_pos.y, 3.5),
+                Projectile {
+                    spell,
+                    damage: 0,
+                    direction: Vec2::ZERO,
+                    speed: 0.0,
+                    elapsed: 0.0,
+                    max_lifetime: 0.4, // visual only
+                },
+                LevelEntity,
+            ));
+            for (e_ent, et, mut hp, boss) in &mut enemy_q {
+                if player_pos.distance(et.translation.truncate()) < radius {
+                    hp.current -= rng.gen_range(6..=10);
+                    commands.entity(e_ent).insert(Burning {
+                        timer: 3.5,
+                        damage_per_tick: 2.0,
+                        tick_elapsed: 0.0,
+                    });
+                    commands.entity(e_ent).insert(DamageFlinch {
+                        timer: 0.0,
+                        normal_color: Color::srgb(0.35, 0.9, 0.35),
+                        flash_color: Color::srgb(0.1, 1.0, 0.1),
+                    });
+                    if hp.current <= 0 {
+                        if boss.is_some() { game_map.boss_dead = true; score.score += 150; }
+                        else { score.score += 10; }
+                        score.kills += 1;
+                        commands.entity(e_ent).despawn_recursive();
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Projectile movement & collision ───────────────────────────────────────────
+
+pub fn update_projectiles(
+    mut commands: Commands,
+    time: Res<Time>,
+    game_map: Res<GameMap>,
+    mut proj_q: Query<(Entity, &mut Projectile, &mut Transform, &mut TextColor)>,
+    mut enemy_q: Query<(Entity, &Transform, &mut Health), (With<Enemy>, Without<Projectile>)>,
+) {
+    let dt = time.delta_secs();
+
+    for (proj_entity, mut proj, mut tf, mut color) in &mut proj_q {
+        proj.elapsed += dt;
+
+        // Fade out in last 30% of life
+        let t = proj.elapsed / proj.max_lifetime;
+        if t >= 1.0 {
+            commands.entity(proj_entity).despawn_recursive();
+            continue;
+        }
+        let alpha = if t > 0.7 { 1.0 - (t - 0.7) / 0.3 } else { 1.0 };
+        let (r, g, b) = proj.spell.color();
+        *color = TextColor(Color::srgba(r, g, b, alpha));
+
+        if proj.speed == 0.0 { continue; } // visual-only flash
+
+        // Move
+        let delta = proj.direction * proj.speed * dt;
+        tf.translation.x += delta.x;
+        tf.translation.y += delta.y;
+
+        // Wall collision
+        let pos = tf.translation.truncate();
+        let (gx, gy) = world_to_grid(pos);
+        if !game_map.is_walkable(gx, gy) {
+            commands.entity(proj_entity).despawn_recursive();
+            continue;
+        }
+
+        // Enemy collision
+        let mut hit = false;
+        for (e_ent, et, mut e_hp) in &mut enemy_q {
+            if pos.distance(et.translation.truncate()) < TILE_SIZE * 0.75 {
+                e_hp.current -= proj.damage;
+                let (pr, pg, pb) = proj.spell.color();
+                commands.entity(e_ent).insert(DamageFlinch {
+                    timer: 0.0,
+                    normal_color: Color::WHITE,
+                    flash_color: Color::srgb(pr, pg, pb),
+                });
+                match proj.spell {
+                    SpellType::Fireball => {
+                        commands.entity(e_ent).insert(Burning {
+                            timer: 3.0,
+                            damage_per_tick: 2.0,
+                            tick_elapsed: 0.0,
+                        });
+                    }
+                    SpellType::IceShard => {
+                        commands.entity(e_ent).insert(Slowed { timer: 4.0, factor: 0.25 });
+                    }
+                    _ => {}
+                }
+                hit = true;
+                break;
+            }
+        }
+        if hit { commands.entity(proj_entity).despawn_recursive(); }
+    }
+}
+
+// ── Status effects (Burning / Slowed) ─────────────────────────────────────────
+
+pub fn update_status_effects(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut q: Query<
+        (Entity, &mut Sprite, &mut Health, Option<&mut Burning>, Option<&mut Slowed>),
+        With<Enemy>,
+    >,
+) {
+    let dt = time.delta_secs();
+    let t_secs = time.elapsed_secs();
+
+    for (e_ent, mut sprite, mut health, burning, slowed) in &mut q {
+        let active_burn = if let Some(mut burn) = burning {
+            burn.timer -= dt;
+            burn.tick_elapsed += dt;
+            if burn.tick_elapsed >= Burning::TICK_RATE {
+                burn.tick_elapsed -= Burning::TICK_RATE;
+                health.current -= burn.damage_per_tick as i32;
+            }
+            if burn.timer <= 0.0 { commands.entity(e_ent).remove::<Burning>(); false }
+            else { true }
+        } else { false };
+
+        let active_slow = if let Some(mut slow) = slowed {
+            slow.timer -= dt;
+            if slow.timer <= 0.0 { commands.entity(e_ent).remove::<Slowed>(); false }
+            else { true }
+        } else { false };
+
+        // Color priority: DamageFlinch handled elsewhere, we only set when no flinch
+        // (DamageFlinch removes itself from the query via Without filter when active,
+        //  so enemies here are guaranteed not flinching — skip the Without filter and
+        //  just let update_damage_flinch win by running after us in the schedule)
+        if active_burn {
+            let flash = (t_secs * 7.0).floor() as u32 % 2 == 0;
+            sprite.color = if flash { Color::srgb(1.0, 0.45, 0.1) } else { Color::srgb(0.85, 0.65, 0.15) };
+        } else if active_slow {
+            sprite.color = Color::srgb(0.35, 0.65, 1.0);
+        }
+        // If neither, telegraph/flinch systems or normal_q in update_enemy_telegraph
+        // will restore the sprite to white.
+    }
+}
+
 // ── Player input ──────────────────────────────────────────────────────────────
 
 pub fn player_input(
@@ -319,19 +593,20 @@ pub fn player_input(
 
 pub fn enemy_ai(
     player_q: Query<&Transform, With<Player>>,
-    mut enemy_q: Query<(&Transform, &mut Velocity), (With<Enemy>, Without<Player>)>,
+    mut enemy_q: Query<(&Transform, &mut Velocity, Option<&Slowed>), (With<Enemy>, Without<Player>)>,
 ) {
     let Ok(pt) = player_q.get_single() else { return; };
     let player_pos = pt.translation.truncate();
 
-    for (et, mut vel) in &mut enemy_q {
+    for (et, mut vel, slowed) in &mut enemy_q {
         let ep = et.translation.truncate();
         let dist = ep.distance(player_pos);
+        let speed_mul = slowed.map(|s| s.factor).unwrap_or(1.0);
 
         if dist > ENEMY_CHASE_RADIUS || dist < ATTACK_RANGE * 0.75 {
             vel.linvel = Vec2::ZERO;
         } else {
-            vel.linvel = (player_pos - ep).normalize_or_zero() * ENEMY_SPEED;
+            vel.linvel = (player_pos - ep).normalize_or_zero() * ENEMY_SPEED * speed_mul;
         }
     }
 }
@@ -466,7 +741,7 @@ pub fn update_enemy_telegraph(
     >,
     mut normal_q: Query<
         &mut Sprite,
-        (With<Enemy>, Without<WindUp>, Without<DamageFlinch>),
+        (With<Enemy>, Without<WindUp>, Without<DamageFlinch>, Without<Burning>, Without<Slowed>),
     >,
 ) {
     for (wu, mut sprite, boss) in &mut winding_q {
@@ -607,6 +882,7 @@ pub fn check_item_pickup(
     mut score: ResMut<GameScore>,
     mut player_health_q: Query<&mut Health, With<Player>>,
     mut loot_log: ResMut<LootLog>,
+    mut player_spells: ResMut<PlayerSpells>,
 ) {
     let Ok(pt) = player_q.get_single() else { return; };
     let pp = pt.translation.truncate();
@@ -614,7 +890,7 @@ pub fn check_item_pickup(
 
     for (ce, ct) in &chest_q {
         if pp.distance(ct.translation.truncate()) < TILE_SIZE * 0.9 {
-            let msg = apply_random_loot(&mut player_stats, &mut score, &mut rng, &mut player_health_q);
+            let msg = apply_random_loot(&mut player_stats, &mut score, &mut rng, &mut player_health_q, &mut player_spells);
             loot_log.push(msg.clone());
             spawn_loot_popup(&mut commands, &game_font, ct.translation.truncate(), &msg);
             commands.entity(ce).despawn_recursive();
@@ -623,7 +899,7 @@ pub fn check_item_pickup(
 
     for (ie, it, item) in &item_q {
         if pp.distance(it.translation.truncate()) < TILE_SIZE * 0.9 {
-            let msg = apply_item(&item.0, &mut player_stats, &mut score, &mut player_health_q);
+            let msg = apply_item(&item.0, &mut player_stats, &mut score, &mut player_health_q, &mut player_spells);
             loot_log.push(msg.clone());
             spawn_loot_popup(&mut commands, &game_font, it.translation.truncate(), &msg);
             commands.entity(ie).despawn_recursive();
@@ -636,8 +912,18 @@ fn apply_random_loot(
     score: &mut GameScore,
     rng: &mut impl Rng,
     health_q: &mut Query<&mut Health, With<Player>>,
+    spells: &mut PlayerSpells,
 ) -> String {
-    match rng.gen_range(0u32..4) {
+    // Collect spells the player is still missing
+    let all = [SpellType::IceShard, SpellType::Lightning, SpellType::PoisonCloud];
+    let missing: Vec<SpellType> = all.iter().copied()
+        .filter(|s| !spells.known.contains(s))
+        .collect();
+
+    // If spells are available, add them as a 5th outcome (~20% chance)
+    let pool = if missing.is_empty() { 4u32 } else { 5 };
+
+    match rng.gen_range(0..pool) {
         0 => { stats.attack += 1;  score.score += 5; "ATK +1".to_string() }
         1 => { stats.defense += 1; score.score += 5; "DEF +1".to_string() }
         2 => {
@@ -646,10 +932,16 @@ fn apply_random_loot(
             score.score += 5;
             format!("HP +{}", heal)
         }
-        _ => {
+        3 => {
             let gold = rng.gen_range(5u32..=25);
             score.score += gold;
             format!("+{} GOLD", gold)
+        }
+        _ => {
+            let spell = missing[rng.gen_range(0..missing.len())];
+            spells.known.push(spell);
+            score.score += 20;
+            format!("Scroll: {}", spell.name())
         }
     }
 }
@@ -659,12 +951,18 @@ fn apply_item(
     stats: &mut PlayerStats,
     score: &mut GameScore,
     health_q: &mut Query<&mut Health, With<Player>>,
+    spells: &mut PlayerSpells,
 ) -> String {
     match item {
         ItemType::Weapon  => { stats.attack += 1;  score.score += 5; "ATK +1".to_string() }
         ItemType::Armor   => { stats.defense += 1; score.score += 5; "DEF +1".to_string() }
         ItemType::Potion  => { heal_player(stats, health_q, 10); score.score += 5; "HP +10".to_string() }
         ItemType::Coins(n) => { score.score += n; format!("+{} GOLD", n) }
+        ItemType::SpellScroll(spell) => {
+            if !spells.known.contains(spell) { spells.known.push(*spell); }
+            score.score += 20;
+            format!("Scroll: {}", spell.name())
+        }
     }
 }
 
@@ -681,10 +979,11 @@ fn spawn_loot_popup(commands: &mut Commands, font: &GameFont, world_pos: Vec2, t
 }
 
 fn loot_rgb(msg: &str) -> (f32, f32, f32) {
-    if msg.starts_with("ATK")      { (1.0, 0.50, 0.15) }  // orange
-    else if msg.starts_with("DEF") { (0.30, 0.80, 1.0) }  // cyan
-    else if msg.starts_with("HP")  { (0.25, 1.0,  0.45) } // green
-    else                           { (1.0,  0.88, 0.15) }  // gold
+    if msg.starts_with("ATK")        { (1.0,  0.50, 0.15) } // orange
+    else if msg.starts_with("DEF")   { (0.30, 0.80, 1.0)  } // cyan
+    else if msg.starts_with("HP")    { (0.25, 1.0,  0.45) } // green
+    else if msg.starts_with("Scroll"){ (0.75, 0.35, 1.0)  } // purple
+    else                             { (1.0,  0.88, 0.15) } // gold
 }
 
 fn heal_player(
@@ -931,9 +1230,16 @@ fn spawn_hud(commands: &mut Commands, font: Handle<Font>, level: u32, hp: i32, m
                 ));
                 row.spawn((
                     Node::default(),
-                    Text::new("WASD: Move  |  Space/Z: Attack  |  Shift: Block (SP)  |  Kill Boss -> ladder"),
-                    TextFont { font: font.clone(), font_size: 12.0, ..default() },
-                    TextColor(Color::srgb(0.45, 0.45, 0.5)),
+                    Text::new("[Q] Fireball  MP: 60/60  |  E: cycle"),
+                    TextFont { font: font.clone(), font_size: 14.0, ..default() },
+                    TextColor(Color::srgb(0.55, 0.55, 1.0)),
+                    HudSpellText,
+                ));
+                row.spawn((
+                    Node::default(),
+                    Text::new("WASD: Move  Space/Z: Atk  Shift: Block  Q: Spell  E: Cycle"),
+                    TextFont { font: font.clone(), font_size: 11.0, ..default() },
+                    TextColor(Color::srgb(0.4, 0.4, 0.45)),
                 ));
             });
         });
@@ -944,21 +1250,26 @@ pub fn update_hud(
     player_stats: Res<PlayerStats>,
     current_level: Res<CurrentLevel>,
     loot_log: Res<LootLog>,
+    player_spells: Res<PlayerSpells>,
     mut hp_q: Query<
         &mut Text,
-        (With<HudHealthText>, Without<HudScoreText>, Without<HudLevelText>, Without<HudLootLogText>),
+        (With<HudHealthText>, Without<HudScoreText>, Without<HudLevelText>, Without<HudLootLogText>, Without<HudSpellText>),
     >,
     mut score_q: Query<
         &mut Text,
-        (With<HudScoreText>, Without<HudHealthText>, Without<HudLevelText>, Without<HudLootLogText>),
+        (With<HudScoreText>, Without<HudHealthText>, Without<HudLevelText>, Without<HudLootLogText>, Without<HudSpellText>),
     >,
     mut level_q: Query<
         &mut Text,
-        (With<HudLevelText>, Without<HudHealthText>, Without<HudScoreText>, Without<HudLootLogText>),
+        (With<HudLevelText>, Without<HudHealthText>, Without<HudScoreText>, Without<HudLootLogText>, Without<HudSpellText>),
     >,
     mut log_q: Query<
         (&HudLootLogText, &mut Text),
-        (Without<HudHealthText>, Without<HudScoreText>, Without<HudLevelText>),
+        (Without<HudHealthText>, Without<HudScoreText>, Without<HudLevelText>, Without<HudSpellText>),
+    >,
+    mut spell_q: Query<
+        &mut Text,
+        (With<HudSpellText>, Without<HudHealthText>, Without<HudScoreText>, Without<HudLevelText>, Without<HudLootLogText>),
     >,
 ) {
     for mut t in &mut hp_q {
@@ -986,6 +1297,21 @@ pub fn update_hud(
     for (slot, mut t) in &mut log_q {
         let entry = loot_log.entries.get(slot.0).map(String::as_str).unwrap_or("");
         *t = Text::new(entry);
+    }
+    for mut t in &mut spell_q {
+        let spell = player_spells.known.get(player_spells.active).copied();
+        let name = spell.map(|s| s.name()).unwrap_or("—");
+        let cd = if player_spells.cooldown > 0.0 {
+            format!(" (cd {:.1}s)", player_spells.cooldown)
+        } else {
+            String::new()
+        };
+        *t = Text::new(format!(
+            "[Q] {}{}  |  MP {}/{}  |  E: cycle",
+            name, cd,
+            player_stats.mana as i32,
+            player_stats.max_mana as i32,
+        ));
     }
 }
 
@@ -1033,10 +1359,12 @@ pub fn setup_main_menu(mut commands: Commands, game_font: Res<GameFont>) {
 
             for &line in &[
                 "WASD / Arrow Keys  --  Move",
-                "Get near an enemy, press Space or Z  --  Attack",
+                "Space / Z  --  Melee attack",
+                "Q  --  Cast active spell  (costs mana)",
+                "E  --  Cycle to next spell",
                 "Hold Shift  --  Block  (reduces damage to 15%, drains stamina)",
                 "  Stamina runs out → Shield breaks!  Wait 2s to recover.",
-                "Walk over a chest  --  Open it  (weapon / armor / potion / coins)",
+                "Walk over a chest  --  Open it  (weapon / armor / potion / coins / scrolls)",
                 "Kill the BOSS (☠)  --  Ladder (↓) appears",
                 "Use the ladder  --  Descend to the next floor",
                 "",
@@ -1060,12 +1388,14 @@ pub fn menu_input(
     mut score: ResMut<GameScore>,
     mut current_level: ResMut<CurrentLevel>,
     mut loot_log: ResMut<LootLog>,
+    mut player_spells: ResMut<PlayerSpells>,
 ) {
     if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) {
         *player_stats = PlayerStats::default();
         *score = GameScore::default();
         *current_level = CurrentLevel(1);
         *loot_log = LootLog::default();
+        *player_spells = PlayerSpells::default();
         next_state.set(GameState::Playing);
     }
 }

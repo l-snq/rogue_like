@@ -20,6 +20,9 @@ pub const SHIELD_REGEN_RATE: f32 = 18.0;      // stamina / sec when idle
 pub const SHIELD_BREAK_RECOVERY: f32 = 2.2;   // seconds until usable again
 pub const SHIELD_BLOCK_RATIO: f32 = 0.15;     // fraction of damage that bleeds through
 
+pub const SPELL_COOLDOWN_SECS: f32 = 1.1;
+pub const MANA_REGEN_RATE: f32 = 5.0;         // mana / sec passive regen
+
 // ── Coordinate helpers ────────────────────────────────────────────────────────
 
 /// Top-left corner of the map in world space.
@@ -182,6 +185,66 @@ impl LootLog {
     }
 }
 
+// ── Spell resources ───────────────────────────────────────────────────────────
+
+/// All spells the player can cast.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SpellType {
+    Fireball,
+    IceShard,
+    Lightning,
+    PoisonCloud,
+}
+
+impl SpellType {
+    pub fn name(self) -> &'static str {
+        match self {
+            SpellType::Fireball    => "Fireball",
+            SpellType::IceShard   => "Ice Shard",
+            SpellType::Lightning  => "Lightning",
+            SpellType::PoisonCloud => "Venom Cloud",
+        }
+    }
+    pub fn mana_cost(self) -> f32 {
+        match self {
+            SpellType::Fireball    => 15.0,
+            SpellType::IceShard   => 12.0,
+            SpellType::Lightning  => 28.0,
+            SpellType::PoisonCloud => 20.0,
+        }
+    }
+    /// Text glyph used for the projectile (or cast flash).
+    pub fn glyph(self) -> &'static str {
+        match self {
+            SpellType::Fireball    => "●",
+            SpellType::IceShard   => "◆",
+            SpellType::Lightning  => "★",
+            SpellType::PoisonCloud => "✦",
+        }
+    }
+    pub fn color(self) -> (f32, f32, f32) {
+        match self {
+            SpellType::Fireball    => (1.0, 0.35, 0.0),
+            SpellType::IceShard   => (0.4, 0.85, 1.0),
+            SpellType::Lightning  => (1.0, 1.0,  0.2),
+            SpellType::PoisonCloud => (0.4, 1.0, 0.35),
+        }
+    }
+}
+
+#[derive(Resource)]
+pub struct PlayerSpells {
+    pub known:    Vec<SpellType>,
+    pub active:   usize,
+    pub cooldown: f32,
+}
+
+impl Default for PlayerSpells {
+    fn default() -> Self {
+        Self { known: vec![SpellType::Fireball], active: 0, cooldown: 0.0 }
+    }
+}
+
 // ── Score / Level resources ───────────────────────────────────────────────────
 
 #[derive(Resource, Default)]
@@ -210,6 +273,8 @@ pub struct PlayerStats {
     pub is_blocking: bool,
     pub shield_broken: bool,
     pub shield_recovery: f32,
+    pub mana: f32,
+    pub max_mana: f32,
 }
 
 impl Default for PlayerStats {
@@ -224,6 +289,8 @@ impl Default for PlayerStats {
             is_blocking: false,
             shield_broken: false,
             shield_recovery: 0.0,
+            mana: 60.0,
+            max_mana: 60.0,
         }
     }
 }

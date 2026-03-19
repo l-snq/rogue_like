@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use crate::resources::SpellType;
 
 // ── Tile / Map ────────────────────────────────────────────────────────────────
 
@@ -53,6 +54,7 @@ pub enum ItemType {
     Armor,
     Potion,
     Coins(u32),
+    SpellScroll(SpellType),
 }
 
 #[derive(Component)]
@@ -96,6 +98,36 @@ pub struct DamageFlinch {
 
 impl DamageFlinch {
     pub const DURATION: f32 = 0.45;
+}
+
+// ── Spells & projectiles ──────────────────────────────────────────────────────
+
+#[derive(Component)]
+pub struct Projectile {
+    pub spell:        SpellType,
+    pub damage:       i32,
+    pub direction:    Vec2,
+    pub speed:        f32,
+    pub elapsed:      f32,
+    pub max_lifetime: f32,
+}
+
+/// Damage-over-time applied by Fireball / Venom Cloud.
+#[derive(Component)]
+pub struct Burning {
+    pub timer:          f32,
+    pub damage_per_tick: f32,
+    pub tick_elapsed:   f32,
+}
+impl Burning {
+    pub const TICK_RATE: f32 = 0.6;
+}
+
+/// Speed debuff applied by Ice Shard.
+#[derive(Component)]
+pub struct Slowed {
+    pub timer:  f32,
+    pub factor: f32, // velocity multiplier
 }
 
 // ── Enemy telegraph ───────────────────────────────────────────────────────────
@@ -156,3 +188,6 @@ pub struct HudLevelText;
 /// Slot index 0 = most recent pickup. Up to LootLog::MAX_ENTRIES slots spawned.
 #[derive(Component)]
 pub struct HudLootLogText(pub usize);
+
+#[derive(Component)]
+pub struct HudSpellText;
