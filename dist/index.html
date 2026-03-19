@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>Descent</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+        canvas { display: block; outline: none; }
+    </style>
+    
+<script type="module">
+import init, * as bindings from '/rogue_like-86f1760b4e7476f0.js';
+const wasm = await init({ module_or_path: '/rogue_like-86f1760b4e7476f0_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
+    
+<link rel="modulepreload" href="/rogue_like-86f1760b4e7476f0.js" crossorigin="anonymous" integrity="sha384-sERaZDTmyqGTpoAqgYWyeq1i/1idy4vQB05Y2rsJ1JCxXjCYpc3K0JzDNOJvFTV/"><link rel="preload" href="/rogue_like-86f1760b4e7476f0_bg.wasm" crossorigin="anonymous" integrity="sha384-0w8F8zV8oSHB2StWKg0KUsdgtIFOh6O5awGpFXZmugNWyJ+A/sZvgrhztuHIasZU" as="fetch" type="application/wasm"></head>
+<body></body>
+</html>

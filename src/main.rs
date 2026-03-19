@@ -24,9 +24,14 @@ fn main() {
     let mut app = App::new();
 
     app.add_plugins(
-        DefaultPlugins.set(WindowPlugin {
+        DefaultPlugins
+        .set(AssetPlugin {
+            meta_check: bevy::asset::AssetMetaCheck::Never,
+            ..default()
+        })
+        .set(WindowPlugin {
             primary_window: Some(Window {
-                title: "Rogue Adventure".to_string(),
+                title: "Descent".to_string(),
                 resolution: (1280.0, 720.0).into(),
                 resizable: false,
                 ..default()

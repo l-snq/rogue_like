@@ -1338,7 +1338,7 @@ pub fn setup_main_menu(mut commands: Commands, game_font: Res<GameFont>) {
         .with_children(|p| {
             p.spawn((
                 Node::default(),
-                Text::new("ROGUE  ADVENTURE"),
+                Text::new("DESCENT"),
                 TextFont { font: font.clone(), font_size: 70.0, ..default() },
                 TextColor(Color::srgb(1.0, 0.8, 0.05)),
             ));
