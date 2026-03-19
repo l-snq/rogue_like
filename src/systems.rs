@@ -20,13 +20,14 @@ const CH_ENEMY:     &str = "☻";   // U+263B  black smiling face
 const CH_BOSS:      &str = "☠";   // U+2620  skull & crossbones
 const CH_CHEST:     &str = "▣";   // U+25A3  white square containing black square
 const CH_LADDER:    &str = "↓";   // U+2193  downwards arrow
-const CH_SWING_A:   &str = "✦";   // U+2726  black four-pointed star
-const CH_SWING_B:   &str = "✧";   // U+2727  white four-pointed star
+const CH_SWORD:     &str = "†";   // U+2020  dagger — rotated each frame
 
 // Normal entity colours (used by DamageFlinch restore)
-pub const COL_PLAYER:  Color = Color::srgb(1.0, 1.0,  0.0);
-pub const COL_ENEMY:   Color = Color::srgb(1.0, 0.45, 0.45);
-pub const COL_BOSS:    Color = Color::srgb(1.0, 0.15, 0.15);
+pub const COL_PLAYER:    Color = Color::srgb(1.0, 1.0,  0.0);  // yellow — default
+pub const COL_BLOCKING:  Color = Color::srgb(0.0, 1.0,  1.0);  // cyan   — shield up
+pub const COL_BROKEN:    Color = Color::srgb(1.0, 0.5,  0.0);  // orange — shield broken
+pub const COL_ENEMY:     Color = Color::srgb(1.0, 0.45, 0.45);
+pub const COL_BOSS:      Color = Color::srgb(1.0, 0.15, 0.15);
 
 // ── Generic cleanup ───────────────────────────────────────────────────────────
 
@@ -202,7 +203,7 @@ pub fn setup_level(
     ));
 
     // ── HUD ───────────────────────────────────────────────────────────────────
-    spawn_hud(&mut commands, font, current_level.0, player_stats.hp, player_stats.max_hp);
+    spawn_hud(&mut commands, font, current_level.0, player_stats.hp, player_stats.max_hp, player_stats.stamina, player_stats.max_stamina);
 }
 
 // ── Level transition ──────────────────────────────────────────────────────────
@@ -225,6 +226,62 @@ pub fn tick_cooldowns(time: Res<Time>, mut q: Query<&mut AttackCooldown>) {
     let dt = time.delta_secs();
     for mut cd in &mut q {
         cd.0 = (cd.0 - dt).max(0.0);
+    }
+}
+
+// ── Shield / stamina ──────────────────────────────────────────────────────────
+
+pub fn shield_system(
+    time: Res<Time>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut player_stats: ResMut<PlayerStats>,
+) {
+    let dt = time.delta_secs();
+    let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+
+    if player_stats.shield_broken {
+        // Shield is broken — wait out the recovery timer, slowly regen stamina
+        player_stats.is_blocking = false;
+        player_stats.shield_recovery -= dt;
+        player_stats.stamina = (player_stats.stamina + SHIELD_REGEN_RATE * 0.4 * dt)
+            .min(player_stats.max_stamina);
+        if player_stats.shield_recovery <= 0.0 {
+            player_stats.shield_broken = false;
+            player_stats.shield_recovery = 0.0;
+        }
+    } else if shift && player_stats.stamina > 0.0 {
+        // Actively blocking — drain stamina
+        player_stats.is_blocking = true;
+        player_stats.stamina -= SHIELD_DRAIN_RATE * dt;
+        if player_stats.stamina <= 0.0 {
+            player_stats.stamina = 0.0;
+            player_stats.is_blocking = false;
+            player_stats.shield_broken = true;
+            player_stats.shield_recovery = SHIELD_BREAK_RECOVERY;
+        }
+    } else {
+        // Idle — regenerate stamina
+        player_stats.is_blocking = false;
+        player_stats.stamina = (player_stats.stamina + SHIELD_REGEN_RATE * dt)
+            .min(player_stats.max_stamina);
+    }
+}
+
+// ── Player colour (reflects shield state) ─────────────────────────────────────
+
+pub fn update_player_color(
+    player_stats: Res<PlayerStats>,
+    mut q: Query<&mut TextColor, (With<Player>, Without<DamageFlinch>)>,
+) {
+    let col = if player_stats.shield_broken {
+        COL_BROKEN
+    } else if player_stats.is_blocking {
+        COL_BLOCKING
+    } else {
+        COL_PLAYER
+    };
+    for mut tc in &mut q {
+        *tc = TextColor(col);
     }
 }
 
@@ -304,7 +361,7 @@ pub fn combat_system(
         // Spawn rotating cross swing effect
         let origin = player_pos + facing.0 * TILE_SIZE * 1.4;
         commands.spawn((
-            Text2d::new(CH_SWING_A),
+            Text2d::new(CH_SWORD),
             TextFont { font: game_font.0.clone(), font_size: TILE_SIZE * 1.25, ..default() },
             TextColor(Color::srgb(1.0, 1.0, 0.55)),
             Transform::from_xyz(origin.x, origin.y, 3.0),
@@ -330,13 +387,25 @@ pub fn combat_system(
                 });
             }
             if e_cd.0 <= 0.0 {
-                let dmg = (e_atk.0 - p_def.0 + rng.gen_range(0..=2)).max(1);
+                let raw = (e_atk.0 - p_def.0 + rng.gen_range(0..=2)).max(1);
+                let dmg = if player_stats.is_blocking {
+                    (raw as f32 * SHIELD_BLOCK_RATIO).round().max(1.0) as i32
+                } else {
+                    raw
+                };
                 p_hp.current -= dmg;
                 e_cd.0 = ATTACK_COOLDOWN_SECS + 0.25;
-                // Flash red on player hit
+                // Flinch colour restores to whatever the shield state is
+                let normal = if player_stats.shield_broken {
+                    COL_BROKEN
+                } else if player_stats.is_blocking {
+                    COL_BLOCKING
+                } else {
+                    COL_PLAYER
+                };
                 commands.entity(player_entity).insert(DamageFlinch {
                     timer: 0.0,
-                    normal_color: COL_PLAYER,
+                    normal_color: normal,
                     flash_color: Color::srgb(1.0, 0.1, 0.1),
                 });
             }
@@ -384,8 +453,8 @@ pub fn update_swing_effects(
     time: Res<Time>,
     player_q: Query<(&Transform, &FacingDirection), With<Player>>,
     mut q: Query<
-        (Entity, &mut SwingEffect, &mut Transform, &mut Text2d, &mut TextColor),
-        Without<Player>,
+        (Entity, &mut SwingEffect, &mut Transform, &mut TextColor),
+        (With<SwingEffect>, Without<Player>),
     >,
 ) {
     let (player_pos, facing_dir) = player_q
@@ -393,9 +462,11 @@ pub fn update_swing_effects(
         .map(|(t, f)| (t.translation.truncate(), f.0))
         .unwrap_or((Vec2::ZERO, Vec2::X));
 
+    // Angle the facing direction points in world space
+    let facing_angle = facing_dir.y.atan2(facing_dir.x);
     let perp = Vec2::new(-facing_dir.y, facing_dir.x);
 
-    for (entity, mut effect, mut transform, mut text, mut color) in &mut q {
+    for (entity, mut effect, mut transform, mut color) in &mut q {
         effect.elapsed += time.delta_secs();
         let t = (effect.elapsed / SwingEffect::DURATION).clamp(0.0, 1.0);
 
@@ -404,17 +475,19 @@ pub fn update_swing_effects(
             continue;
         }
 
-        // Arc sweep: +perp → centre → -perp
-        let arc = perp * (1.0 - t * 2.0) * TILE_SIZE * 0.65;
-        let pos = player_pos + facing_dir * TILE_SIZE * 1.4 + arc;
+        // Sweep offset goes +1 → -1 over the duration
+        let sweep = 1.0 - t * 2.0;
+
+        // Arc the position slightly along the perpendicular axis
+        let pos = player_pos + facing_dir * TILE_SIZE * 1.4 + perp * sweep * TILE_SIZE * 0.5;
         transform.translation.x = pos.x;
         transform.translation.y = pos.y;
 
-        // Alternate ✦ / ✧ every 70 ms
-        let frame = (effect.elapsed / 0.07) as usize;
-        *text = Text2d::new(if frame % 2 == 0 { CH_SWING_A } else { CH_SWING_B });
+        // Rotate the glyph: sweep ±80° around the facing direction
+        let angle = facing_angle + sweep * std::f32::consts::PI * 0.45;
+        transform.rotation = Quat::from_rotation_z(angle);
 
-        // Fade in final 35%
+        // Fade out in the final 35%
         let alpha = if t > 0.65 { 1.0 - (t - 0.65) / 0.35 } else { 1.0 };
         *color = TextColor(Color::srgba(1.0, 1.0, 0.55, alpha));
     }
@@ -631,7 +704,7 @@ pub fn update_entity_visibility(
 //  HUD
 // ═══════════════════════════════════════════════════════════════════════════════
 
-fn spawn_hud(commands: &mut Commands, font: Handle<Font>, level: u32, hp: i32, max_hp: i32) {
+fn spawn_hud(commands: &mut Commands, font: Handle<Font>, level: u32, hp: i32, max_hp: i32, stamina: f32, max_stamina: f32) {
     commands
         .spawn((
             Node {
@@ -680,14 +753,18 @@ fn spawn_hud(commands: &mut Commands, font: Handle<Font>, level: u32, hp: i32, m
             .with_children(|row| {
                 row.spawn((
                     Node::default(),
-                    Text::new(format!("HP  {}/{}   ATK {}   DEF {}", hp, max_hp, 5, 2)),
+                    Text::new(format!(
+                        "HP {}/{}  ATK {}  DEF {}   SP {}/{}",
+                        hp, max_hp, 5, 2,
+                        stamina as i32, max_stamina as i32
+                    )),
                     TextFont { font: font.clone(), font_size: 20.0, ..default() },
                     TextColor(Color::srgb(0.15, 1.0, 0.45)),
                     HudHealthText,
                 ));
                 row.spawn((
                     Node::default(),
-                    Text::new("WASD/Arrows: Move  |  Space/Z: Attack  |  Walk over chest: Open  |  Kill Boss -> ladder appears"),
+                    Text::new("WASD: Move  |  Space/Z: Attack  |  Shift: Block (SP)  |  Kill Boss -> ladder"),
                     TextFont { font: font.clone(), font_size: 12.0, ..default() },
                     TextColor(Color::srgb(0.45, 0.45, 0.5)),
                 ));
@@ -713,10 +790,19 @@ pub fn update_hud(
     >,
 ) {
     for mut t in &mut hp_q {
+        let shield_label = if player_stats.shield_broken {
+            "  [SHIELD BROKEN]"
+        } else if player_stats.is_blocking {
+            "  [BLOCKING]"
+        } else {
+            ""
+        };
         *t = Text::new(format!(
-            "HP  {}/{}   ATK {}   DEF {}",
+            "HP {}/{}  ATK {}  DEF {}   SP {}/{}{}",
             player_stats.hp, player_stats.max_hp,
-            player_stats.attack, player_stats.defense
+            player_stats.attack, player_stats.defense,
+            player_stats.stamina as i32, player_stats.max_stamina as i32,
+            shield_label
         ));
     }
     for mut t in &mut score_q {
@@ -772,6 +858,8 @@ pub fn setup_main_menu(mut commands: Commands, game_font: Res<GameFont>) {
             for &line in &[
                 "WASD / Arrow Keys  --  Move",
                 "Get near an enemy, press Space or Z  --  Attack",
+                "Hold Shift  --  Block  (reduces damage to 15%, drains stamina)",
+                "  Stamina runs out → Shield breaks!  Wait 2s to recover.",
                 "Walk over a chest  --  Open it  (weapon / armor / potion / coins)",
                 "Kill the BOSS (☠)  --  Ladder (↓) appears",
                 "Use the ladder  --  Descend to the next floor",

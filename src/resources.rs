@@ -15,6 +15,11 @@ pub const ENEMY_CHASE_RADIUS: f32 = TILE_SIZE * 10.0;
 pub const ATTACK_COOLDOWN_SECS: f32 = 0.75;
 pub const ATTACK_RANGE: f32 = TILE_SIZE * 1.6;
 
+pub const SHIELD_DRAIN_RATE: f32 = 28.0;      // stamina / sec while blocking
+pub const SHIELD_REGEN_RATE: f32 = 18.0;      // stamina / sec when idle
+pub const SHIELD_BREAK_RECOVERY: f32 = 2.2;   // seconds until usable again
+pub const SHIELD_BLOCK_RATIO: f32 = 0.15;     // fraction of damage that bleeds through
+
 // ── Coordinate helpers ────────────────────────────────────────────────────────
 
 /// Top-left corner of the map in world space.
@@ -169,6 +174,11 @@ pub struct PlayerStats {
     pub max_hp: i32,
     pub attack: i32,
     pub defense: i32,
+    pub stamina: f32,
+    pub max_stamina: f32,
+    pub is_blocking: bool,
+    pub shield_broken: bool,
+    pub shield_recovery: f32,
 }
 
 impl Default for PlayerStats {
@@ -178,6 +188,11 @@ impl Default for PlayerStats {
             max_hp: 30,
             attack: 5,
             defense: 2,
+            stamina: 100.0,
+            max_stamina: 100.0,
+            is_blocking: false,
+            shield_broken: false,
+            shield_recovery: 0.0,
         }
     }
 }

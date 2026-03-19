@@ -58,11 +58,13 @@ fn main() {
         Update,
         (
             tick_cooldowns,
+            shield_system,
             player_input,
             enemy_ai,
             combat_system,
             update_damage_flinch,
             update_swing_effects,
+            update_player_color,
             check_item_pickup,
             check_ladder,
             check_death,
