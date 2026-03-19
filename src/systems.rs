@@ -9,6 +9,25 @@ use crate::{
     GameState,
 };
 
+// ── Character constants ───────────────────────────────────────────────────────
+// JetBrainsMonoNerdFont covers all of these.
+
+const CH_WALL_VIS:  &str = "█";   // U+2588  full block
+const CH_WALL_EXP:  &str = "▒";   // U+2592  medium shade
+const CH_FLOOR_VIS: &str = "·";   // U+00B7  middle dot
+const CH_PLAYER:    &str = "@";
+const CH_ENEMY:     &str = "☻";   // U+263B  black smiling face
+const CH_BOSS:      &str = "☠";   // U+2620  skull & crossbones
+const CH_CHEST:     &str = "▣";   // U+25A3  white square containing black square
+const CH_LADDER:    &str = "↓";   // U+2193  downwards arrow
+const CH_SWING_A:   &str = "✦";   // U+2726  black four-pointed star
+const CH_SWING_B:   &str = "✧";   // U+2727  white four-pointed star
+
+// Normal entity colours (used by DamageFlinch restore)
+pub const COL_PLAYER:  Color = Color::srgb(1.0, 1.0,  0.0);
+pub const COL_ENEMY:   Color = Color::srgb(1.0, 0.45, 0.45);
+pub const COL_BOSS:    Color = Color::srgb(1.0, 0.15, 0.15);
+
 // ── Generic cleanup ───────────────────────────────────────────────────────────
 
 pub fn cleanup_entities<T: Component>(
@@ -35,12 +54,15 @@ pub fn setup_level(
     mut game_map: ResMut<GameMap>,
     current_level: Res<CurrentLevel>,
     player_stats: Res<PlayerStats>,
+    game_font: Res<GameFont>,
 ) {
     game_map.reset();
 
     let data = generate_level(current_level.0);
     game_map.tiles = data.tiles;
     game_map.rooms = data.rooms;
+
+    let font = game_font.0.clone();
 
     // ── Tile entities ─────────────────────────────────────────────────────────
     let mut tile_entities = vec![Entity::PLACEHOLDER; MAP_WIDTH * MAP_HEIGHT];
@@ -53,28 +75,21 @@ pub fn setup_level(
 
             let mut ec = commands.spawn((
                 Text2d::new(" "),
-                TextFont { font_size: TILE_SIZE, ..default() },
+                TextFont { font: font.clone(), font_size: TILE_SIZE, ..default() },
                 TextColor(Color::NONE),
                 Transform::from_xyz(world.x, world.y, 0.0),
                 TilePos { x: gx, y: gy },
                 LevelEntity,
             ));
 
-            // Add a physics collider only for walls that border at least one floor tile
             if tile == TileType::Wall {
                 let mut borders_floor = false;
                 'outer: for dy in -1i32..=1 {
                     for dx in -1i32..=1 {
-                        if dx == 0 && dy == 0 {
-                            continue;
-                        }
+                        if dx == 0 && dy == 0 { continue; }
                         let nx = gx as i32 + dx;
                         let ny = gy as i32 + dy;
-                        if nx >= 0
-                            && ny >= 0
-                            && nx < MAP_WIDTH as i32
-                            && ny < MAP_HEIGHT as i32
-                        {
+                        if nx >= 0 && ny >= 0 && nx < MAP_WIDTH as i32 && ny < MAP_HEIGHT as i32 {
                             let ni = ny as usize * MAP_WIDTH + nx as usize;
                             if game_map.tiles[ni] == TileType::Floor {
                                 borders_floor = true;
@@ -99,12 +114,11 @@ pub fn setup_level(
 
     // ── Player ────────────────────────────────────────────────────────────────
     let pw = grid_to_world(data.player_start.0, data.player_start.1);
-    // Split into nested tuples — Bevy Bundle impls only go up to 15 elements.
     commands.spawn((
         (
-            Text2d::new("@"),
-            TextFont { font_size: TILE_SIZE, ..default() },
-            TextColor(Color::srgb(1.0, 1.0, 0.0)),
+            Text2d::new(CH_PLAYER),
+            TextFont { font: font.clone(), font_size: TILE_SIZE, ..default() },
+            TextColor(COL_PLAYER),
             Transform::from_xyz(pw.x, pw.y, 2.0),
             Player,
             Health::new(player_stats.max_hp),
@@ -128,15 +142,15 @@ pub fn setup_level(
     for spawn in &data.enemies {
         let ew = grid_to_world(spawn.x, spawn.y);
         let (ch, col) = if spawn.is_boss {
-            ("B", Color::srgb(1.0, 0.15, 0.15))
+            (CH_BOSS, COL_BOSS)
         } else {
-            ("E", Color::srgb(1.0, 0.45, 0.45))
+            (CH_ENEMY, COL_ENEMY)
         };
 
         let mut ec = commands.spawn((
             (
                 Text2d::new(ch),
-                TextFont { font_size: TILE_SIZE, ..default() },
+                TextFont { font: font.clone(), font_size: TILE_SIZE, ..default() },
                 TextColor(col),
                 Transform::from_xyz(ew.x, ew.y, 2.0),
                 Enemy,
@@ -166,8 +180,8 @@ pub fn setup_level(
     for &(cx, cy) in &data.chests {
         let cw = grid_to_world(cx, cy);
         commands.spawn((
-            Text2d::new("C"),
-            TextFont { font_size: TILE_SIZE, ..default() },
+            Text2d::new(CH_CHEST),
+            TextFont { font: font.clone(), font_size: TILE_SIZE, ..default() },
             TextColor(Color::srgb(0.85, 0.65, 0.15)),
             Transform::from_xyz(cw.x, cw.y, 1.5),
             Chest,
@@ -178,8 +192,8 @@ pub fn setup_level(
     // ── Ladder (hidden until boss dies) ───────────────────────────────────────
     let lw = grid_to_world(data.ladder_pos.0, data.ladder_pos.1);
     commands.spawn((
-        Text2d::new(">"),
-        TextFont { font_size: TILE_SIZE, ..default() },
+        Text2d::new(CH_LADDER),
+        TextFont { font: font.clone(), font_size: TILE_SIZE, ..default() },
         TextColor(Color::srgb(0.2, 1.0, 0.3)),
         Transform::from_xyz(lw.x, lw.y, 1.5),
         Ladder,
@@ -188,10 +202,10 @@ pub fn setup_level(
     ));
 
     // ── HUD ───────────────────────────────────────────────────────────────────
-    spawn_hud(&mut commands, current_level.0, player_stats.hp, player_stats.max_hp);
+    spawn_hud(&mut commands, font, current_level.0, player_stats.hp, player_stats.max_hp);
 }
 
-// ── Between-level transition  (OnEnter LevelTransition) ──────────────────────
+// ── Level transition ──────────────────────────────────────────────────────────
 
 pub fn transition_level(
     mut next_state: ResMut<NextState<GameState>>,
@@ -220,23 +234,13 @@ pub fn player_input(
     keys: Res<ButtonInput<KeyCode>>,
     mut player_q: Query<(&mut Velocity, &mut FacingDirection), With<Player>>,
 ) {
-    let Ok((mut vel, mut facing)) = player_q.get_single_mut() else {
-        return;
-    };
+    let Ok((mut vel, mut facing)) = player_q.get_single_mut() else { return; };
 
     let mut dir = Vec2::ZERO;
-    if keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::ArrowUp) {
-        dir.y += 1.0;
-    }
-    if keys.pressed(KeyCode::KeyS) || keys.pressed(KeyCode::ArrowDown) {
-        dir.y -= 1.0;
-    }
-    if keys.pressed(KeyCode::KeyA) || keys.pressed(KeyCode::ArrowLeft) {
-        dir.x -= 1.0;
-    }
-    if keys.pressed(KeyCode::KeyD) || keys.pressed(KeyCode::ArrowRight) {
-        dir.x += 1.0;
-    }
+    if keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::ArrowUp)    { dir.y += 1.0; }
+    if keys.pressed(KeyCode::KeyS) || keys.pressed(KeyCode::ArrowDown)  { dir.y -= 1.0; }
+    if keys.pressed(KeyCode::KeyA) || keys.pressed(KeyCode::ArrowLeft)  { dir.x -= 1.0; }
+    if keys.pressed(KeyCode::KeyD) || keys.pressed(KeyCode::ArrowRight) { dir.x += 1.0; }
 
     if dir != Vec2::ZERO {
         vel.linvel = dir.normalize() * PLAYER_SPEED;
@@ -252,9 +256,7 @@ pub fn enemy_ai(
     player_q: Query<&Transform, With<Player>>,
     mut enemy_q: Query<(&Transform, &mut Velocity), (With<Enemy>, Without<Player>)>,
 ) {
-    let Ok(pt) = player_q.get_single() else {
-        return;
-    };
+    let Ok(pt) = player_q.get_single() else { return; };
     let player_pos = pt.translation.truncate();
 
     for (et, mut vel) in &mut enemy_q {
@@ -274,8 +276,9 @@ pub fn enemy_ai(
 pub fn combat_system(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
+    game_font: Res<GameFont>,
     mut player_q: Query<
-        (&Transform, &mut Health, &Attack, &Defense, &mut AttackCooldown, &FacingDirection),
+        (Entity, &Transform, &mut Health, &Attack, &Defense, &mut AttackCooldown, &FacingDirection),
         With<Player>,
     >,
     mut enemy_q: Query<
@@ -286,22 +289,23 @@ pub fn combat_system(
     mut game_map: ResMut<GameMap>,
     mut player_stats: ResMut<PlayerStats>,
 ) {
-    let Ok((pt, mut p_hp, p_atk, p_def, mut p_cd, facing)) = player_q.get_single_mut() else {
+    let Ok((player_entity, pt, mut p_hp, p_atk, p_def, mut p_cd, facing)) =
+        player_q.get_single_mut()
+    else {
         return;
     };
     let player_pos = pt.translation.truncate();
     let mut rng = rand::thread_rng();
 
-    // Consume the attack input once and check cooldown.
     let pressed = keys.just_pressed(KeyCode::Space) || keys.just_pressed(KeyCode::KeyZ);
     let can_attack = pressed && p_cd.0 <= 0.0;
 
     if can_attack {
-        // Spawn the rotating cross swing effect in the facing direction.
+        // Spawn rotating cross swing effect
         let origin = player_pos + facing.0 * TILE_SIZE * 1.4;
         commands.spawn((
-            Text2d::new("+"),
-            TextFont { font_size: TILE_SIZE * 1.2, ..default() },
+            Text2d::new(CH_SWING_A),
+            TextFont { font: game_font.0.clone(), font_size: TILE_SIZE * 1.25, ..default() },
             TextColor(Color::srgb(1.0, 1.0, 0.55)),
             Transform::from_xyz(origin.x, origin.y, 3.0),
             SwingEffect { elapsed: 0.0 },
@@ -314,16 +318,27 @@ pub fn combat_system(
         let dist = player_pos.distance(et.translation.truncate());
 
         if dist < ATTACK_RANGE {
-            // Player strike — hits all enemies in range on the same keypress.
             if can_attack {
                 let dmg = (p_atk.0 - e_def.0 + rng.gen_range(0..=3)).max(1);
                 e_hp.current -= dmg;
+                // Flash white on enemy hit
+                let normal = if boss.is_some() { COL_BOSS } else { COL_ENEMY };
+                commands.entity(e_ent).insert(DamageFlinch {
+                    timer: 0.0,
+                    normal_color: normal,
+                    flash_color: Color::srgb(1.0, 1.0, 1.0),
+                });
             }
-            // Enemy strike — automatic.
             if e_cd.0 <= 0.0 {
                 let dmg = (e_atk.0 - p_def.0 + rng.gen_range(0..=2)).max(1);
                 p_hp.current -= dmg;
                 e_cd.0 = ATTACK_COOLDOWN_SECS + 0.25;
+                // Flash red on player hit
+                commands.entity(player_entity).insert(DamageFlinch {
+                    timer: 0.0,
+                    normal_color: COL_PLAYER,
+                    flash_color: Color::srgb(1.0, 0.1, 0.1),
+                });
             }
         }
 
@@ -342,21 +357,42 @@ pub fn combat_system(
     player_stats.hp = p_hp.current;
 }
 
+// ── Damage flinch / flicker ───────────────────────────────────────────────────
+
+pub fn update_damage_flinch(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut q: Query<(Entity, &mut DamageFlinch, &mut TextColor)>,
+) {
+    for (entity, mut flinch, mut color) in &mut q {
+        flinch.timer += time.delta_secs();
+        if flinch.timer >= DamageFlinch::DURATION {
+            *color = TextColor(flinch.normal_color);
+            commands.entity(entity).remove::<DamageFlinch>();
+        } else {
+            // Flicker at ~12 Hz
+            let flash = (flinch.timer / 0.055).floor() as u32 % 2 == 0;
+            *color = TextColor(if flash { flinch.flash_color } else { flinch.normal_color });
+        }
+    }
+}
+
 // ── Swing effect animation ────────────────────────────────────────────────────
 
 pub fn update_swing_effects(
     mut commands: Commands,
     time: Res<Time>,
     player_q: Query<(&Transform, &FacingDirection), With<Player>>,
-    mut q: Query<(Entity, &mut SwingEffect, &mut Transform, &mut Text2d, &mut TextColor), Without<Player>>,
+    mut q: Query<
+        (Entity, &mut SwingEffect, &mut Transform, &mut Text2d, &mut TextColor),
+        Without<Player>,
+    >,
 ) {
-    // Snapshot player state once — the swing effect tracks the player as they move.
     let (player_pos, facing_dir) = player_q
         .get_single()
         .map(|(t, f)| (t.translation.truncate(), f.0))
         .unwrap_or((Vec2::ZERO, Vec2::X));
 
-    // Perpendicular to facing — used to arc the effect sideways like a sweep.
     let perp = Vec2::new(-facing_dir.y, facing_dir.x);
 
     for (entity, mut effect, mut transform, mut text, mut color) in &mut q {
@@ -368,17 +404,17 @@ pub fn update_swing_effects(
             continue;
         }
 
-        // Arc: sweep from one side through centre to the other (t 0→1 = +perp→−perp).
-        let arc_offset = perp * (1.0 - t * 2.0) * TILE_SIZE * 0.65;
-        let pos = player_pos + facing_dir * TILE_SIZE * 1.4 + arc_offset;
+        // Arc sweep: +perp → centre → -perp
+        let arc = perp * (1.0 - t * 2.0) * TILE_SIZE * 0.65;
+        let pos = player_pos + facing_dir * TILE_SIZE * 1.4 + arc;
         transform.translation.x = pos.x;
         transform.translation.y = pos.y;
 
-        // Cycle +/x to suggest the cross spinning.
+        // Alternate ✦ / ✧ every 70 ms
         let frame = (effect.elapsed / 0.07) as usize;
-        *text = Text2d::new(if frame % 2 == 0 { "+" } else { "x" });
+        *text = Text2d::new(if frame % 2 == 0 { CH_SWING_A } else { CH_SWING_B });
 
-        // Fade out over the last 35% of the animation.
+        // Fade in final 35%
         let alpha = if t > 0.65 { 1.0 - (t - 0.65) / 0.35 } else { 1.0 };
         *color = TextColor(Color::srgba(1.0, 1.0, 0.55, alpha));
     }
@@ -395,9 +431,7 @@ pub fn check_item_pickup(
     mut score: ResMut<GameScore>,
     mut player_health_q: Query<&mut Health, With<Player>>,
 ) {
-    let Ok(pt) = player_q.get_single() else {
-        return;
-    };
+    let Ok(pt) = player_q.get_single() else { return; };
     let pp = pt.translation.truncate();
     let mut rng = rand::thread_rng();
 
@@ -430,10 +464,7 @@ fn apply_random_loot(
             heal_player(stats, health_q, heal);
             score.score += 5;
         }
-        _ => {
-            let coins = rng.gen_range(5u32..=25);
-            score.score += coins;
-        }
+        _ => { score.score += rng.gen_range(5u32..=25); }
     }
 }
 
@@ -472,15 +503,11 @@ pub fn check_ladder(
     mut score: ResMut<GameScore>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
-    let Ok(pt) = player_q.get_single() else {
-        return;
-    };
+    let Ok(pt) = player_q.get_single() else { return; };
     let pp = pt.translation.truncate();
 
     for (lt, mut vis) in &mut ladder_q {
-        if game_map.boss_dead {
-            *vis = Visibility::Visible;
-        }
+        if game_map.boss_dead { *vis = Visibility::Visible; }
         if game_map.boss_dead && pp.distance(lt.translation.truncate()) < TILE_SIZE * 0.9 {
             score.score += 50;
             if current_level.0 >= NUM_LEVELS {
@@ -499,13 +526,9 @@ pub fn check_death(
     mut player_stats: ResMut<PlayerStats>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
-    let Ok(hp) = player_q.get_single() else {
-        return;
-    };
+    let Ok(hp) = player_q.get_single() else { return; };
     player_stats.hp = hp.current;
-    if hp.current <= 0 {
-        next_state.set(GameState::GameOver);
-    }
+    if hp.current <= 0 { next_state.set(GameState::GameOver); }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -516,29 +539,19 @@ pub fn update_fog_of_war(
     player_q: Query<&Transform, With<Player>>,
     mut game_map: ResMut<GameMap>,
 ) {
-    let Ok(pt) = player_q.get_single() else {
-        return;
-    };
+    let Ok(pt) = player_q.get_single() else { return; };
     let (px, py) = world_to_grid(pt.translation.truncate());
 
-    // Demote visible → explored
     for f in game_map.fog.iter_mut() {
-        if *f == FogState::Visible {
-            *f = FogState::Explored;
-        }
+        if *f == FogState::Visible { *f = FogState::Explored; }
     }
 
-    // Reveal tiles inside view circle with LoS
     for dy in -VIEW_RADIUS..=VIEW_RADIUS {
         for dx in -VIEW_RADIUS..=VIEW_RADIUS {
             let tx = px + dx;
             let ty = py + dy;
-            if tx < 0 || ty < 0 || tx >= MAP_WIDTH as i32 || ty >= MAP_HEIGHT as i32 {
-                continue;
-            }
-            if dx * dx + dy * dy > VIEW_RADIUS * VIEW_RADIUS {
-                continue;
-            }
+            if tx < 0 || ty < 0 || tx >= MAP_WIDTH as i32 || ty >= MAP_HEIGHT as i32 { continue; }
+            if dx * dx + dy * dy > VIEW_RADIUS * VIEW_RADIUS { continue; }
             if line_of_sight(&game_map, px, py, tx, ty) {
                 let idx = ty as usize * MAP_WIDTH + tx as usize;
                 game_map.fog[idx] = FogState::Visible;
@@ -555,12 +568,8 @@ fn line_of_sight(map: &GameMap, x0: i32, y0: i32, x1: i32, y1: i32) -> bool {
     let sy: i32 = if y0 < y1 { 1 } else { -1 };
     let mut err = dx - dy;
     loop {
-        if x == x1 && y == y1 {
-            return true;
-        }
-        if (x != x0 || y != y0) && map.tile_at(x, y) == TileType::Wall {
-            return false;
-        }
+        if x == x1 && y == y1 { return true; }
+        if (x != x0 || y != y0) && map.tile_at(x, y) == TileType::Wall { return false; }
         let e2 = 2 * err;
         if e2 > -dy { err -= dy; x += sx; }
         if e2 < dx  { err += dx; y += sy; }
@@ -579,15 +588,15 @@ pub fn update_tile_rendering(
                 *color = TextColor(Color::NONE);
             }
             FogState::Explored => {
-                let ch = if game_map.tiles[idx] == TileType::Wall { "#" } else { "." };
+                let ch = if game_map.tiles[idx] == TileType::Wall { CH_WALL_EXP } else { CH_FLOOR_VIS };
                 *text = Text2d::new(ch);
-                *color = TextColor(Color::srgb(0.18, 0.18, 0.22));
+                *color = TextColor(Color::srgb(0.16, 0.16, 0.20));
             }
             FogState::Visible => {
                 let (ch, c) = if game_map.tiles[idx] == TileType::Wall {
-                    ("#", Color::srgb(0.55, 0.55, 0.65))
+                    (CH_WALL_VIS, Color::srgb(0.52, 0.52, 0.62))
                 } else {
-                    (".", Color::srgb(0.28, 0.28, 0.36))
+                    (CH_FLOOR_VIS, Color::srgb(0.26, 0.26, 0.34))
                 };
                 *text = Text2d::new(ch);
                 *color = TextColor(c);
@@ -596,19 +605,11 @@ pub fn update_tile_rendering(
     }
 }
 
-/// Hide game entities when their tile is in fog.
-/// Excludes: tiles (TilePos), player (Player), UI nodes (Node), sprites (Sprite).
 pub fn update_entity_visibility(
     game_map: Res<GameMap>,
     mut q: Query<
         (&Transform, &mut Visibility),
-        (
-            With<LevelEntity>,
-            Without<TilePos>,
-            Without<Player>,
-            Without<Node>,
-            Without<Sprite>,
-        ),
+        (With<LevelEntity>, Without<TilePos>, Without<Player>, Without<Node>, Without<Sprite>),
     >,
 ) {
     for (t, mut vis) in &mut q {
@@ -630,7 +631,7 @@ pub fn update_entity_visibility(
 //  HUD
 // ═══════════════════════════════════════════════════════════════════════════════
 
-fn spawn_hud(commands: &mut Commands, level: u32, hp: i32, max_hp: i32) {
+fn spawn_hud(commands: &mut Commands, font: Handle<Font>, level: u32, hp: i32, max_hp: i32) {
     commands
         .spawn((
             Node {
@@ -644,7 +645,7 @@ fn spawn_hud(commands: &mut Commands, level: u32, hp: i32, max_hp: i32) {
             LevelEntity,
         ))
         .with_children(|root| {
-            // ── Top bar ───────────────────────────────────────────────────────
+            // Top bar
             root.spawn(Node {
                 flex_direction: FlexDirection::Row,
                 justify_content: JustifyContent::SpaceBetween,
@@ -655,20 +656,20 @@ fn spawn_hud(commands: &mut Commands, level: u32, hp: i32, max_hp: i32) {
                 row.spawn((
                     Node::default(),
                     Text::new(format!("Floor  {}/{}", level, NUM_LEVELS)),
-                    TextFont { font_size: 20.0, ..default() },
+                    TextFont { font: font.clone(), font_size: 20.0, ..default() },
                     TextColor(Color::srgb(0.85, 0.85, 0.85)),
                     HudLevelText,
                 ));
                 row.spawn((
                     Node::default(),
                     Text::new("Score: 0   Kills: 0"),
-                    TextFont { font_size: 20.0, ..default() },
+                    TextFont { font: font.clone(), font_size: 20.0, ..default() },
                     TextColor(Color::srgb(1.0, 0.82, 0.1)),
                     HudScoreText,
                 ));
             });
 
-            // ── Bottom bar ────────────────────────────────────────────────────
+            // Bottom bar
             root.spawn(Node {
                 flex_direction: FlexDirection::Row,
                 justify_content: JustifyContent::SpaceBetween,
@@ -680,14 +681,14 @@ fn spawn_hud(commands: &mut Commands, level: u32, hp: i32, max_hp: i32) {
                 row.spawn((
                     Node::default(),
                     Text::new(format!("HP  {}/{}   ATK {}   DEF {}", hp, max_hp, 5, 2)),
-                    TextFont { font_size: 20.0, ..default() },
+                    TextFont { font: font.clone(), font_size: 20.0, ..default() },
                     TextColor(Color::srgb(0.15, 1.0, 0.45)),
                     HudHealthText,
                 ));
                 row.spawn((
                     Node::default(),
-                    Text::new("WASD/Arrows: Move  |  Space/Z: Attack (when near enemy)  |  Walk over chest: Open  |  Kill Boss -> > appears"),
-                    TextFont { font_size: 12.0, ..default() },
+                    Text::new("WASD/Arrows: Move  |  Space/Z: Attack  |  Walk over chest: Open  |  Kill Boss -> ladder appears"),
+                    TextFont { font: font.clone(), font_size: 12.0, ..default() },
                     TextColor(Color::srgb(0.45, 0.45, 0.5)),
                 ));
             });
@@ -730,7 +731,8 @@ pub fn update_hud(
 //  MENUS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-pub fn setup_main_menu(mut commands: Commands) {
+pub fn setup_main_menu(mut commands: Commands, game_font: Res<GameFont>) {
+    let font = game_font.0.clone();
     commands
         .spawn((
             Node {
@@ -739,7 +741,7 @@ pub fn setup_main_menu(mut commands: Commands) {
                 flex_direction: FlexDirection::Column,
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                row_gap: Val::Px(16.0),
+                row_gap: Val::Px(14.0),
                 ..default()
             },
             BackgroundColor(Color::srgb(0.04, 0.04, 0.06)),
@@ -749,38 +751,38 @@ pub fn setup_main_menu(mut commands: Commands) {
             p.spawn((
                 Node::default(),
                 Text::new("ROGUE  ADVENTURE"),
-                TextFont { font_size: 70.0, ..default() },
+                TextFont { font: font.clone(), font_size: 70.0, ..default() },
                 TextColor(Color::srgb(1.0, 0.8, 0.05)),
             ));
             p.spawn((
                 Node::default(),
                 Text::new("Descend five deadly floors and slay the final boss"),
-                TextFont { font_size: 20.0, ..default() },
+                TextFont { font: font.clone(), font_size: 20.0, ..default() },
                 TextColor(Color::srgb(0.6, 0.6, 0.6)),
             ));
-            p.spawn(Node { height: Val::Px(20.0), ..default() });
+            p.spawn(Node { height: Val::Px(18.0), ..default() });
             p.spawn((
                 Node::default(),
                 Text::new("[ PRESS  ENTER  TO  START ]"),
-                TextFont { font_size: 30.0, ..default() },
+                TextFont { font: font.clone(), font_size: 30.0, ..default() },
                 TextColor(Color::srgb(0.25, 1.0, 0.5)),
             ));
-            p.spawn(Node { height: Val::Px(28.0), ..default() });
+            p.spawn(Node { height: Val::Px(24.0), ..default() });
 
             for &line in &[
                 "WASD / Arrow Keys  --  Move",
                 "Get near an enemy, press Space or Z  --  Attack",
                 "Walk over a chest  --  Open it  (weapon / armor / potion / coins)",
-                "Kill the BOSS (B)  --  Ladder (>) appears",
+                "Kill the BOSS (☠)  --  Ladder (↓) appears",
                 "Use the ladder  --  Descend to the next floor",
                 "",
-                "  @  Player       E  Enemy       B  Boss",
-                "  C  Chest        >  Ladder",
+                "  @  Player       ☻  Enemy       ☠  Boss",
+                "  ▣  Chest        ↓  Ladder",
             ] {
                 p.spawn((
                     Node::default(),
                     Text::new(line),
-                    TextFont { font_size: 15.0, ..default() },
+                    TextFont { font: font.clone(), font_size: 15.0, ..default() },
                     TextColor(Color::srgb(0.5, 0.5, 0.56)),
                 ));
             }
@@ -802,13 +804,13 @@ pub fn menu_input(
     }
 }
 
-// ── Game Over ─────────────────────────────────────────────────────────────────
-
 pub fn setup_game_over(
     mut commands: Commands,
     score: Res<GameScore>,
     current_level: Res<CurrentLevel>,
+    game_font: Res<GameFont>,
 ) {
+    let font = game_font.0.clone();
     commands
         .spawn((
             Node {
@@ -824,43 +826,31 @@ pub fn setup_game_over(
             MenuEntity,
         ))
         .with_children(|p| {
-            p.spawn((
-                Node::default(),
-                Text::new("YOU  DIED"),
-                TextFont { font_size: 80.0, ..default() },
-                TextColor(Color::srgb(0.9, 0.07, 0.07)),
-            ));
-            p.spawn((
-                Node::default(),
-                Text::new(format!("Reached floor  {}", current_level.0)),
-                TextFont { font_size: 28.0, ..default() },
-                TextColor(Color::srgb(0.72, 0.72, 0.72)),
-            ));
-            p.spawn((
-                Node::default(),
-                Text::new(format!("Final Score:  {}", score.score)),
-                TextFont { font_size: 42.0, ..default() },
-                TextColor(Color::srgb(1.0, 0.82, 0.1)),
-            ));
-            p.spawn((
-                Node::default(),
-                Text::new(format!("Enemies killed:  {}", score.kills)),
-                TextFont { font_size: 22.0, ..default() },
-                TextColor(Color::srgb(0.6, 0.6, 0.6)),
-            ));
+            p.spawn((Node::default(), Text::new("YOU  DIED"),
+                TextFont { font: font.clone(), font_size: 80.0, ..default() },
+                TextColor(Color::srgb(0.9, 0.07, 0.07))));
+            p.spawn((Node::default(), Text::new(format!("Reached floor  {}", current_level.0)),
+                TextFont { font: font.clone(), font_size: 28.0, ..default() },
+                TextColor(Color::srgb(0.72, 0.72, 0.72))));
+            p.spawn((Node::default(), Text::new(format!("Final Score:  {}", score.score)),
+                TextFont { font: font.clone(), font_size: 42.0, ..default() },
+                TextColor(Color::srgb(1.0, 0.82, 0.1))));
+            p.spawn((Node::default(), Text::new(format!("Enemies killed:  {}", score.kills)),
+                TextFont { font: font.clone(), font_size: 22.0, ..default() },
+                TextColor(Color::srgb(0.6, 0.6, 0.6))));
             p.spawn(Node { height: Val::Px(20.0), ..default() });
-            p.spawn((
-                Node::default(),
-                Text::new("[ ENTER — Return to Menu ]"),
-                TextFont { font_size: 26.0, ..default() },
-                TextColor(Color::srgb(0.4, 0.75, 1.0)),
-            ));
+            p.spawn((Node::default(), Text::new("[ ENTER -- Return to Menu ]"),
+                TextFont { font: font.clone(), font_size: 26.0, ..default() },
+                TextColor(Color::srgb(0.4, 0.75, 1.0))));
         });
 }
 
-// ── Victory ───────────────────────────────────────────────────────────────────
-
-pub fn setup_victory(mut commands: Commands, score: Res<GameScore>) {
+pub fn setup_victory(
+    mut commands: Commands,
+    score: Res<GameScore>,
+    game_font: Res<GameFont>,
+) {
+    let font = game_font.0.clone();
     commands
         .spawn((
             Node {
@@ -876,37 +866,22 @@ pub fn setup_victory(mut commands: Commands, score: Res<GameScore>) {
             MenuEntity,
         ))
         .with_children(|p| {
-            p.spawn((
-                Node::default(),
-                Text::new("VICTORY!"),
-                TextFont { font_size: 80.0, ..default() },
-                TextColor(Color::srgb(0.15, 1.0, 0.35)),
-            ));
-            p.spawn((
-                Node::default(),
-                Text::new("You have conquered the dungeon!"),
-                TextFont { font_size: 28.0, ..default() },
-                TextColor(Color::srgb(0.9, 0.9, 0.9)),
-            ));
-            p.spawn((
-                Node::default(),
-                Text::new(format!("Final Score:  {}", score.score)),
-                TextFont { font_size: 44.0, ..default() },
-                TextColor(Color::srgb(1.0, 0.82, 0.1)),
-            ));
-            p.spawn((
-                Node::default(),
-                Text::new(format!("Enemies killed:  {}", score.kills)),
-                TextFont { font_size: 22.0, ..default() },
-                TextColor(Color::srgb(0.6, 0.6, 0.6)),
-            ));
+            p.spawn((Node::default(), Text::new("VICTORY!"),
+                TextFont { font: font.clone(), font_size: 80.0, ..default() },
+                TextColor(Color::srgb(0.15, 1.0, 0.35))));
+            p.spawn((Node::default(), Text::new("You have conquered the dungeon!"),
+                TextFont { font: font.clone(), font_size: 28.0, ..default() },
+                TextColor(Color::srgb(0.9, 0.9, 0.9))));
+            p.spawn((Node::default(), Text::new(format!("Final Score:  {}", score.score)),
+                TextFont { font: font.clone(), font_size: 44.0, ..default() },
+                TextColor(Color::srgb(1.0, 0.82, 0.1))));
+            p.spawn((Node::default(), Text::new(format!("Enemies killed:  {}", score.kills)),
+                TextFont { font: font.clone(), font_size: 22.0, ..default() },
+                TextColor(Color::srgb(0.6, 0.6, 0.6))));
             p.spawn(Node { height: Val::Px(20.0), ..default() });
-            p.spawn((
-                Node::default(),
-                Text::new("[ ENTER — Play Again ]"),
-                TextFont { font_size: 26.0, ..default() },
-                TextColor(Color::srgb(0.4, 0.75, 1.0)),
-            ));
+            p.spawn((Node::default(), Text::new("[ ENTER -- Play Again ]"),
+                TextFont { font: font.clone(), font_size: 26.0, ..default() },
+                TextColor(Color::srgb(0.4, 0.75, 1.0))));
         });
 }
 

@@ -86,6 +86,18 @@ impl SwingEffect {
     pub const DURATION: f32 = 0.32;
 }
 
+/// Flicker-on-hit animation. Cycles entity colour between normal and flash.
+#[derive(Component)]
+pub struct DamageFlinch {
+    pub timer: f32,
+    pub normal_color: Color,
+    pub flash_color: Color,
+}
+
+impl DamageFlinch {
+    pub const DURATION: f32 = 0.45;
+}
+
 // ── Markers for cleanup ───────────────────────────────────────────────────────
 
 /// Everything spawned per-level (tiles, actors, HUD)

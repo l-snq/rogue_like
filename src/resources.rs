@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::text::Font;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -139,6 +140,11 @@ impl GameMap {
         }
     }
 }
+
+// ── Font resource ─────────────────────────────────────────────────────────────
+
+#[derive(Resource)]
+pub struct GameFont(pub Handle<Font>);
 
 // ── Score / Level resources ───────────────────────────────────────────────────
 
