@@ -1,12 +1,12 @@
-//! Injects a real YouTube embed iframe into the page DOM, positioned fixed
-//! on the right side of the screen over the Bevy canvas.
-//! Only compiled for wasm32 targets — the module is empty on native.
+//! Injects a real YouTube embed iframe into the page DOM alongside the Bevy
+//! canvas (not overlapping it). Only compiled for wasm32 targets.
 #![cfg(target_arch = "wasm32")]
 
 use wasm_bindgen::JsCast;
 use web_sys::HtmlElement;
 
 const IFRAME_ID: &str = "yt-brain-rot";
+const IFRAME_WIDTH: &str = "360px";
 
 /// YouTube video IDs to cycle through.
 ///https://youtu.be/
@@ -24,9 +24,32 @@ pub fn show(video_idx: usize) {
     let Some(window) = web_sys::window() else { return };
     let Some(document) = window.document() else { return };
 
-    // Remove any previous iframe first.
     hide_in(&document);
 
+    // Make <body> a flex row so canvas + iframe sit side by side.
+    if let Some(body) = document.body() {
+        let s = body.style();
+        let _ = s.set_property("display", "flex");
+        let _ = s.set_property("flex-direction", "row");
+        let _ = s.set_property("align-items", "stretch");
+        let _ = s.set_property("margin", "0");
+        let _ = s.set_property("padding", "0");
+        let _ = s.set_property("overflow", "hidden");
+        let _ = s.set_property("background", "#000");
+    }
+
+    // Shrink the canvas to leave room for the iframe.
+    if let Ok(Some(el)) = document.query_selector("canvas") {
+        if let Ok(canvas) = el.dyn_into::<HtmlElement>() {
+            let s = canvas.style();
+            let _ = s.set_property("flex", "1");
+            let _ = s.set_property("min-width", "0");
+            let _ = s.set_property("max-width", &format!("calc(100vw - {})", IFRAME_WIDTH));
+            let _ = s.set_property("height", "100vh");
+        }
+    }
+
+    // Build and inject the iframe as a flex sibling of the canvas.
     let video_id = VIDEO_IDS[video_idx % VIDEO_IDS.len()];
     let src = format!(
         "https://www.youtube.com/embed/{}?autoplay=1&rel=0&loop=1&playlist={}",
@@ -40,15 +63,12 @@ pub fn show(video_idx: usize) {
     let _ = el.set_attribute("allowfullscreen", "");
 
     let Ok(html_el) = el.dyn_into::<HtmlElement>() else { return };
-    let style = html_el.style();
-    let _ = style.set_property("position", "fixed");
-    let _ = style.set_property("right", "0");
-    let _ = style.set_property("top", "0");
-    let _ = style.set_property("width", "360px");
-    let _ = style.set_property("height", "100vh");
-    let _ = style.set_property("border", "none");
-    let _ = style.set_property("z-index", "9999");
-    let _ = style.set_property("background", "#000");
+    let s = html_el.style();
+    let _ = s.set_property("width", IFRAME_WIDTH);
+    let _ = s.set_property("flex-shrink", "0");
+    let _ = s.set_property("height", "100vh");
+    let _ = s.set_property("border", "none");
+    let _ = s.set_property("background", "#000");
 
     let Some(body) = document.body() else { return };
     let _ = body.append_child(&html_el);
@@ -57,7 +77,31 @@ pub fn show(video_idx: usize) {
 pub fn hide() {
     let Some(window) = web_sys::window() else { return };
     let Some(document) = window.document() else { return };
+
     hide_in(&document);
+
+    // Restore <body> to its original layout.
+    if let Some(body) = document.body() {
+        let s = body.style();
+        let _ = s.remove_property("display");
+        let _ = s.remove_property("flex-direction");
+        let _ = s.remove_property("align-items");
+        let _ = s.remove_property("margin");
+        let _ = s.remove_property("padding");
+        let _ = s.remove_property("overflow");
+        let _ = s.remove_property("background");
+    }
+
+    // Restore the canvas to its original sizing.
+    if let Ok(Some(el)) = document.query_selector("canvas") {
+        if let Ok(canvas) = el.dyn_into::<HtmlElement>() {
+            let s = canvas.style();
+            let _ = s.remove_property("flex");
+            let _ = s.remove_property("min-width");
+            let _ = s.remove_property("max-width");
+            let _ = s.remove_property("height");
+        }
+    }
 }
 
 fn hide_in(document: &web_sys::Document) {
