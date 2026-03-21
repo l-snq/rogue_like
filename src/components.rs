@@ -191,3 +191,23 @@ pub struct HudLootLogText(pub usize);
 
 #[derive(Component)]
 pub struct HudSpellText;
+
+// ── Brain Rot Panel (YouTube Shorts joke) ────────────────────────────────────
+
+#[derive(Component)]
+pub struct BrainRotPanel;
+
+#[derive(Component)]
+pub struct BrainRotVideoText;
+
+#[derive(Component)]
+pub struct BrainRotVideoTitle;
+
+#[derive(Component)]
+pub struct BrainRotLikesText;
+
+#[derive(Component)]
+pub struct BrainRotCommentText;
+
+#[derive(Component)]
+pub struct BrainRotProgressBar;

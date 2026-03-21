@@ -3804,6 +3804,8 @@ dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.3.4",
  "rand",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

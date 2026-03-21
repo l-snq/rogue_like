@@ -5,6 +5,7 @@ mod components;
 mod level_gen;
 mod resources;
 mod systems;
+mod brain_rot_web;
 
 use resources::*;
 use systems::*;
@@ -54,6 +55,7 @@ fn main() {
     .init_resource::<PlayerStats>()
     .init_resource::<LootLog>()
     .init_resource::<PlayerSpells>()
+    .init_resource::<BrainRotState>()
     // ── Main Menu ──────────────────────────────────────────────────────────────
     .add_systems(OnEnter(GameState::MainMenu), setup_main_menu)
     .add_systems(OnExit(GameState::MainMenu), cleanup_entities::<components::MenuEntity>)
@@ -70,6 +72,7 @@ fn main() {
              update_attack_warnings, update_swing_effects, update_player_color),
             (check_item_pickup, check_ladder, check_death,
              update_fog_of_war, update_tile_rendering, update_entity_visibility, update_hud),
+            (toggle_brain_rot, update_brain_rot),
         )
             .run_if(in_state(GameState::Playing)),
     )

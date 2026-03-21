@@ -245,6 +245,21 @@ impl Default for PlayerSpells {
     }
 }
 
+// ── Brain Rot State ───────────────────────────────────────────────────────────
+
+#[derive(Resource, Default)]
+pub struct BrainRotState {
+    pub visible: bool,
+    pub frame_timer: f32,
+    pub current_frame: usize,
+    pub current_video: usize,
+    pub comment_timer: f32,
+    pub comment_index: usize,
+    pub likes: u64,
+    pub like_timer: f32,
+    pub progress: f32,
+}
+
 // ── Score / Level resources ───────────────────────────────────────────────────
 
 #[derive(Resource, Default)]

@@ -211,7 +211,8 @@ pub fn setup_level(
     ));
 
     // ── HUD ───────────────────────────────────────────────────────────────────
-    spawn_hud(&mut commands, font, current_level.0, player_stats.hp, player_stats.max_hp, player_stats.stamina, player_stats.max_stamina, &loot_log);
+    spawn_hud(&mut commands, font.clone(), current_level.0, player_stats.hp, player_stats.max_hp, player_stats.stamina, player_stats.max_stamina, &loot_log);
+    spawn_brain_rot_panel(&mut commands, font);
 }
 
 // ── Level transition ──────────────────────────────────────────────────────────
@@ -1487,5 +1488,387 @@ pub fn end_screen_input(
 ) {
     if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) {
         next_state.set(GameState::MainMenu);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  BRAIN ROT PANEL  (YouTube Shorts — for educational purposes on attention spans)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const BRAIN_ROT_VIDEOS: &[(&str, &[&str])] = &[
+    ("SUBWAY SURFERS GAMEPLAY", &[
+        "  o  \n /|\\ \n  |  \n / \\ \n~~~~~",
+        "  o  \n  |> \n  |  \n  |/ \n~~~~~",
+        "  o  \n /|  \n  |  \n /|  \n~~~~~",
+        "  o  \n <|  \n  |  \n  |\\ \n~~~~~",
+    ]),
+    ("MINECRAFT PARKOUR POV", &[
+        "[#]     \n    [#] \n[#]     \n========",
+        "  [#]   \n      [#\n  [#]   \n========",
+        "    [#] \n[#]     \n    [#] \n========",
+        "  [#]   \n[#]  [#]\n    [#] \n========",
+    ]),
+    ("FAMILY GUY CLIP #847", &[
+        "  o     \n  |\\    \n / \\    \n  sofa  \n~~~~~~~",
+        "  o_    \n  |\\    \n / \\    \n  sofa  \n~~~~~~~",
+        "  o     \n  |\\    \n / \\    \n ha ha  \n~~~~~~~",
+        " _o_    \n  |\\    \n / \\    \n  sofa  \n~~~~~~~",
+    ]),
+    ("RIZZ TUTORIAL PART 47", &[
+        "  o  \n  |  \n / \\ \n     \n RIZZ",
+        "  O  \n  |  \n / \\ \n     \n RIZZ",
+        "  o  \n  |  \n / \\ \n    *\n RIZZ",
+        "  o* \n  |  \n / \\ \n     \n RIZZ",
+    ]),
+];
+
+const BRAIN_ROT_COMMENTS: &[&str] = &[
+    "W rizz bro",
+    "no cap fr fr",
+    "GOAT moment",
+    "skibidi W",
+    "this is bussin",
+    "bro is built different",
+    "Ohio dungeon speedrun",
+    "sigma grindset",
+    "rizz check: passed",
+    "lowkey slay",
+    "sheeeesh",
+    "certified hood classic",
+    "main character arc",
+    "based ngl",
+    "POV: no life detected",
+    "glazing hard rn",
+    "bro really said that",
+    "living rent free",
+    "gg no re",
+    "this guy is cooked",
+    "not the dungeon arc",
+    "he ate and left no crumbs",
+    "delulu behavior",
+    "bro said let him cook",
+];
+
+fn format_likes(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}K", n as f64 / 1_000.0)
+    } else {
+        format!("{}", n)
+    }
+}
+
+fn spawn_brain_rot_panel(commands: &mut Commands, font: Handle<Font>) {
+    let initial_likes: u64 = 1_247_382;
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
+                width: Val::Px(262.0),
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                overflow: Overflow::clip(),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.06, 0.06, 0.06, 0.97)),
+            Visibility::Hidden,
+            BrainRotPanel,
+            LevelEntity,
+        ))
+        .with_children(|panel| {
+            // ── Header ────────────────────────────────────────────────────────
+            panel.spawn((
+                Node {
+                    padding: UiRect { left: Val::Px(10.0), right: Val::Px(10.0), top: Val::Px(8.0), bottom: Val::Px(6.0) },
+                    ..default()
+                },
+                Text::new("\u{25ba} YouTube Shorts"),
+                TextFont { font: font.clone(), font_size: 14.0, ..default() },
+                TextColor(Color::srgb(1.0, 0.08, 0.08)),
+            ));
+
+            // ── Video title ───────────────────────────────────────────────────
+            panel.spawn((
+                Node {
+                    padding: UiRect { left: Val::Px(10.0), right: Val::Px(10.0), top: Val::Px(0.0), bottom: Val::Px(4.0) },
+                    ..default()
+                },
+                Text::new(BRAIN_ROT_VIDEOS[0].0),
+                TextFont { font: font.clone(), font_size: 10.0, ..default() },
+                TextColor(Color::srgb(0.85, 0.85, 0.85)),
+                BrainRotVideoTitle,
+            ));
+
+            // ── Video area (black bg with ASCII art) ──────────────────────────
+            panel
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(240.0),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
+                ))
+                .with_children(|video| {
+                    video.spawn((
+                        Node::default(),
+                        Text::new(BRAIN_ROT_VIDEOS[0].1[0]),
+                        TextFont { font: font.clone(), font_size: 22.0, ..default() },
+                        TextColor(Color::srgb(0.2, 1.0, 0.2)),
+                        BrainRotVideoText,
+                    ));
+                });
+
+            // ── Progress bar ──────────────────────────────────────────────────
+            panel
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(4.0),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.18, 0.18, 0.18)),
+                ))
+                .with_children(|bar| {
+                    bar.spawn((
+                        Node {
+                            width: Val::Percent(0.0),
+                            height: Val::Percent(100.0),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(1.0, 0.08, 0.08)),
+                        BrainRotProgressBar,
+                    ));
+                });
+
+            // ── Channel + likes ───────────────────────────────────────────────
+            panel
+                .spawn((Node {
+                    padding: UiRect { left: Val::Px(10.0), right: Val::Px(10.0), top: Val::Px(8.0), bottom: Val::Px(4.0) },
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::SpaceBetween,
+                    width: Val::Percent(100.0),
+                    ..default()
+                },))
+                .with_children(|row| {
+                    row.spawn((
+                        Node::default(),
+                        Text::new("@skibidi_rizzler"),
+                        TextFont { font: font.clone(), font_size: 11.0, ..default() },
+                        TextColor(Color::srgb(0.5, 0.5, 0.5)),
+                    ));
+                    row.spawn((
+                        Node::default(),
+                        Text::new(format!("\u{2665} {}", format_likes(initial_likes))),
+                        TextFont { font: font.clone(), font_size: 11.0, ..default() },
+                        TextColor(Color::srgb(1.0, 0.35, 0.35)),
+                        BrainRotLikesText,
+                    ));
+                });
+
+            // ── Caption ───────────────────────────────────────────────────────
+            panel.spawn((
+                Node {
+                    padding: UiRect { left: Val::Px(10.0), right: Val::Px(10.0), top: Val::Px(0.0), bottom: Val::Px(8.0) },
+                    ..default()
+                },
+                Text::new("no cap bro this dungeon goes\nhard fr fr \u{1f525} #gaming #descent"),
+                TextFont { font: font.clone(), font_size: 10.0, ..default() },
+                TextColor(Color::srgb(0.75, 0.75, 0.75)),
+            ));
+
+            // ── Divider ───────────────────────────────────────────────────────
+            panel.spawn((
+                Node { width: Val::Percent(100.0), height: Val::Px(1.0), ..default() },
+                BackgroundColor(Color::srgb(0.2, 0.2, 0.2)),
+            ));
+
+            // ── Subscribe row ─────────────────────────────────────────────────
+            panel.spawn((
+                Node {
+                    padding: UiRect { left: Val::Px(10.0), right: Val::Px(10.0), top: Val::Px(8.0), bottom: Val::Px(8.0) },
+                    ..default()
+                },
+                Text::new("[SUBSCRIBE]  [LIKE]  [SHARE]"),
+                TextFont { font: font.clone(), font_size: 11.0, ..default() },
+                TextColor(Color::srgb(1.0, 0.08, 0.08)),
+            ));
+
+            // ── Divider ───────────────────────────────────────────────────────
+            panel.spawn((
+                Node { width: Val::Percent(100.0), height: Val::Px(1.0), ..default() },
+                BackgroundColor(Color::srgb(0.18, 0.18, 0.18)),
+            ));
+
+            // ── Comments header ───────────────────────────────────────────────
+            panel.spawn((
+                Node {
+                    padding: UiRect { left: Val::Px(10.0), right: Val::Px(10.0), top: Val::Px(8.0), bottom: Val::Px(4.0) },
+                    ..default()
+                },
+                Text::new("COMMENTS"),
+                TextFont { font: font.clone(), font_size: 10.0, ..default() },
+                TextColor(Color::srgb(0.42, 0.42, 0.42)),
+            ));
+
+            // ── Scrolling comments ────────────────────────────────────────────
+            panel.spawn((
+                Node {
+                    padding: UiRect { left: Val::Px(10.0), right: Val::Px(10.0), top: Val::Px(0.0), bottom: Val::Px(10.0) },
+                    ..default()
+                },
+                Text::new("> W rizz bro\n> no cap fr fr\n> GOAT moment\n> skibidi W"),
+                TextFont { font: font.clone(), font_size: 10.0, ..default() },
+                TextColor(Color::srgb(0.72, 0.72, 0.72)),
+                BrainRotCommentText,
+            ));
+
+            // ── Divider ───────────────────────────────────────────────────────
+            panel.spawn((
+                Node { width: Val::Percent(100.0), height: Val::Px(1.0), ..default() },
+                BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
+            ));
+
+            // ── Dismiss hint ──────────────────────────────────────────────────
+            panel.spawn((
+                Node {
+                    padding: UiRect { left: Val::Px(10.0), right: Val::Px(10.0), top: Val::Px(6.0), bottom: Val::Px(6.0) },
+                    ..default()
+                },
+                Text::new("[B] close  |  subscribe to support creator"),
+                TextFont { font: font.clone(), font_size: 9.0, ..default() },
+                TextColor(Color::srgb(0.28, 0.28, 0.28)),
+            ));
+        });
+}
+
+pub fn toggle_brain_rot(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut state: ResMut<BrainRotState>,
+    panel_q: Query<&mut Visibility, With<BrainRotPanel>>,
+) {
+    if !keys.just_pressed(KeyCode::KeyB) {
+        return;
+    }
+    state.visible = !state.visible;
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        if state.visible {
+            crate::brain_rot_web::show(state.current_video);
+        } else {
+            crate::brain_rot_web::hide();
+        }
+        let _ = panel_q; // ASCII panel unused on web
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let vis = if state.visible { Visibility::Visible } else { Visibility::Hidden };
+        let mut panel_q = panel_q;
+        for mut v in &mut panel_q {
+            *v = vis;
+        }
+    }
+}
+
+pub fn update_brain_rot(
+    time: Res<Time>,
+    mut state: ResMut<BrainRotState>,
+    mut video_q: Query<
+        &mut Text,
+        (With<BrainRotVideoText>, Without<BrainRotLikesText>, Without<BrainRotCommentText>, Without<BrainRotVideoTitle>),
+    >,
+    title_q: Query<
+        &mut Text,
+        (With<BrainRotVideoTitle>, Without<BrainRotVideoText>, Without<BrainRotLikesText>, Without<BrainRotCommentText>),
+    >,
+    mut likes_q: Query<
+        &mut Text,
+        (With<BrainRotLikesText>, Without<BrainRotVideoText>, Without<BrainRotCommentText>, Without<BrainRotVideoTitle>),
+    >,
+    mut comment_q: Query<
+        &mut Text,
+        (With<BrainRotCommentText>, Without<BrainRotVideoText>, Without<BrainRotLikesText>, Without<BrainRotVideoTitle>),
+    >,
+    mut bar_q: Query<&mut Node, With<BrainRotProgressBar>>,
+) {
+    if !state.visible {
+        return;
+    }
+
+    let dt = time.delta_secs();
+
+    // Animate video frames at ~4 fps
+    state.frame_timer += dt;
+    if state.frame_timer >= 0.25 {
+        state.frame_timer = 0.0;
+        let frames = BRAIN_ROT_VIDEOS[state.current_video].1;
+        state.current_frame = (state.current_frame + 1) % frames.len();
+        for mut t in &mut video_q {
+            *t = Text::new(frames[state.current_frame]);
+        }
+    }
+
+    // Progress bar — "30 second video"
+    state.progress += dt / 30.0;
+    if state.progress >= 1.0 {
+        state.progress = 0.0;
+        state.current_frame = 0;
+        state.frame_timer = 0.0;
+        state.current_video = (state.current_video + 1) % BRAIN_ROT_VIDEOS.len();
+
+        // On web: reload the iframe with the next real video.
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = &title_q;
+            crate::brain_rot_web::show(state.current_video);
+        }
+
+        // On native: update the ASCII panel text.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let (title, frames) = BRAIN_ROT_VIDEOS[state.current_video];
+            let mut title_q = title_q;
+            for mut t in &mut title_q {
+                *t = Text::new(title);
+            }
+            for mut t in &mut video_q {
+                *t = Text::new(frames[0]);
+            }
+        }
+    }
+    for mut node in &mut bar_q {
+        node.width = Val::Percent(state.progress * 100.0);
+    }
+
+    // Scroll comments every 2 seconds
+    state.comment_timer += dt;
+    if state.comment_timer >= 2.0 {
+        state.comment_timer = 0.0;
+        let mut lines = String::new();
+        for i in 0..4 {
+            let idx = (state.comment_index + i) % BRAIN_ROT_COMMENTS.len();
+            lines.push_str(&format!("> {}\n", BRAIN_ROT_COMMENTS[idx]));
+        }
+        state.comment_index = (state.comment_index + 1) % BRAIN_ROT_COMMENTS.len();
+        for mut t in &mut comment_q {
+            *t = Text::new(lines.trim_end().to_string());
+        }
+    }
+
+    // Like counter ticks up every 0.3 seconds
+    state.like_timer += dt;
+    if state.like_timer >= 0.3 {
+        state.like_timer = 0.0;
+        state.likes += 7;
+        for mut t in &mut likes_q {
+            *t = Text::new(format!("\u{2665} {}", format_likes(state.likes)));
+        }
     }
 }
